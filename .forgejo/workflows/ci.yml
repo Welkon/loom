@@ -11,3 +11,5 @@ jobs:
       - run: cd repo && cargo fmt --check
       - run: cd repo && cargo clippy --all-targets -- -D warnings
       - run: cd repo && cargo test
+
+# trigger
