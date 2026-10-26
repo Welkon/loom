@@ -61,7 +61,11 @@ pub(super) fn add(raw: &[String]) -> Result<Value, Failure> {
     } else {
         None
     };
-    let index = options.index.as_deref().map(Index::open).transpose()?;
+    let index = options
+        .index
+        .as_deref()
+        .map(|base| Index::open(base, options.token.as_deref()))
+        .transpose()?;
     let source = match (&registry, &index) {
         (_, Some(index)) => Source::Index(index),
         (Some(registry), None) => Source::Git(registry),
@@ -175,7 +179,11 @@ pub(super) fn install(raw: &[String]) -> Result<Value, Failure> {
     } else {
         None
     };
-    let index = options.index.as_deref().map(Index::open).transpose()?;
+    let index = options
+        .index
+        .as_deref()
+        .map(|base| Index::open(base, options.token.as_deref()))
+        .transpose()?;
     let source = match (&registry, &index) {
         (_, Some(index)) => Source::Index(index),
         (Some(registry), None) => Source::Git(registry),
@@ -244,7 +252,11 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
     } else {
         None
     };
-    let index = options.index.as_deref().map(Index::open).transpose()?;
+    let index = options
+        .index
+        .as_deref()
+        .map(|base| Index::open(base, options.token.as_deref()))
+        .transpose()?;
     let source = match (&registry, &index) {
         (_, Some(index)) => Source::Index(index),
         (Some(registry), None) => Source::Git(registry),
@@ -955,6 +967,7 @@ struct Options {
     locked: bool,
     registry: Option<String>,
     index: Option<String>,
+    token: Option<String>,
     check: bool,
     out: Option<String>,
     apply: bool,
@@ -972,6 +985,7 @@ impl Options {
             locked: false,
             registry: None,
             index: None,
+            token: None,
             check: false,
             out: None,
             apply: false,
@@ -1021,7 +1035,7 @@ impl Options {
                     );
                     index += 2;
                 }
-                "--cwd" | "--dest" | "--registry" | "--index" => {
+                "--cwd" | "--dest" | "--registry" | "--index" | "--token" => {
                     let value = raw
                         .get(index + 1)
                         .cloned()
@@ -1030,6 +1044,7 @@ impl Options {
                         "--cwd" => options.cwd = Some(value),
                         "--dest" => options.dest = Some(value),
                         "--index" => options.index = Some(value),
+                        "--token" => options.token = Some(value),
                         _ => options.registry = Some(value),
                     }
                     index += 2;

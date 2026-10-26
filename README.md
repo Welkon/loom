@@ -39,6 +39,10 @@ loom update median --index https://loom.pcbsmt.me
 
 The static client uses `curl` for HTTPS. A local directory needs no network.
 
+For a private index, set `LOOM_TOKEN` or pass `--token`. The client sends a
+Bearer token when `config.json` sets `"auth-required": true`; the lock and
+provenance never contain the token.
+
 ## Registry
 
 A registry is a directory with `loom.json` and `loom.lock`. Select it with

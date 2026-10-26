@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.0
+
+- Read `auth-required` from static `config.json` and send a Bearer token from
+  `--token` or `LOOM_TOKEN`.
+
 ## 0.12.3
 
 - Reject unsafe unit names, versions, and non-hex checksums from static

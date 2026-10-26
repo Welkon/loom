@@ -19,10 +19,11 @@ pub(super) struct Index {
     local: Option<PathBuf>,
     cache: PathBuf,
     config: Value,
+    token: Option<String>,
 }
 
 impl Index {
-    pub fn open(base: &str) -> Result<Self, Failure> {
+    pub fn open(base: &str, token: Option<&str>) -> Result<Self, Failure> {
         let base = base.trim_end_matches('/').to_string();
         if base.is_empty() {
             return Err(("missing_index".to_string(), 2));
@@ -32,13 +33,27 @@ impl Index {
             .map(PathBuf::from)
             .or_else(|| (!base.contains("://")).then(|| PathBuf::from(&base)));
         let cache = cache_root();
+        let token = token
+            .map(str::to_string)
+            .or_else(|| std::env::var("LOOM_TOKEN").ok())
+            .filter(|value| !value.is_empty());
+        if token
+            .as_ref()
+            .is_some_and(|value| value.contains(['\n', '\r']))
+        {
+            return Err(("invalid_loom_token".to_string(), 2));
+        }
         let mut index = Self {
             base,
             local,
             cache,
             config: Value::Null,
+            token,
         };
         index.config = serde_json::from_slice(&index.read("config.json")?).unwrap_or(Value::Null);
+        if index.config["auth-required"] == true && index.token.is_none() {
+            return Err(("loom_auth_required".to_string(), 2));
+        }
         Ok(index)
     }
 
@@ -229,8 +244,15 @@ impl Index {
         if !url.contains("://") {
             return fs::read(url).map_err(|_| (code.to_string(), 1));
         }
-        let output = Command::new("curl")
-            .args(["-fsSL", "--max-time", "60", "--retry", "2", url])
+        let mut command = Command::new("curl");
+        command.args(["-fsSL", "--max-time", "60", "--retry", "2"]);
+        if let Some(token) = &self.token {
+            command
+                .arg("-H")
+                .arg(format!("Authorization: Bearer {token}"));
+        }
+        let output = command
+            .arg(url)
             .output()
             .map_err(|_| ("loom_http_client_missing".to_string(), 1))?;
         if !output.status.success() {
