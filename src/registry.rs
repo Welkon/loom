@@ -24,7 +24,7 @@ impl Registry {
             candidates.push(registry_path(directory)?);
         }
         if let Some(directory) = crate::registry_override() {
-            candidates.insert(0, directory);
+            candidates.push(directory);
         }
         if let Ok(directory) = std::env::var("EMB_LOOM_REGISTRY")
             && !directory.is_empty()

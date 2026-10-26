@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Let an explicit `--registry` override the emb-agent runtime fallback.
+
 ## 0.5.0
 
 - Add `loom pack` for producing an addable local registry from a unit.
