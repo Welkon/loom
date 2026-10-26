@@ -4,6 +4,7 @@ use super::registry::{Registry, UnitFile};
 use super::semver;
 use super::store::{self, LockEntry};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -19,6 +20,7 @@ struct Spec {
     commit: String,
     files: Vec<UnitFile>,
     license: String,
+    requires: Vec<String>,
 }
 
 pub(super) fn add(raw: &[String]) -> Result<Value, Failure> {
@@ -41,21 +43,35 @@ pub(super) fn add(raw: &[String]) -> Result<Value, Failure> {
         return Err(("loom_version_not_available".to_string(), 2));
     }
     let destination = destination(&root, &spec, options.dest.as_deref())?;
-    let relative = relative(&root, &destination)?;
-    let already = install_unit(&root, &spec, &destination, options.force, options.dry_run)?;
+    let mut visited = HashSet::new();
+    let mut installed = Vec::new();
+    install_tree(
+        &root,
+        &registry,
+        &spec,
+        &destination,
+        options.force,
+        options.dry_run,
+        &mut visited,
+        &mut installed,
+    )?;
     if !options.dry_run {
-        record(&root, &spec, &relative)?;
         write_integration(&root)?;
     }
+    let requested = installed.iter().find(|entry| entry["id"] == spec.id);
+    let already = requested
+        .and_then(|entry| entry["already_installed"].as_bool())
+        .unwrap_or(false);
     Ok(json!({
         "status": "ok",
         "operation": "loom_add",
         "unit": spec.id,
         "version": spec.version,
-        "destination": relative,
+        "destination": relative(&root, &destination)?,
         "manifest": "loom.toml",
         "lock": "loom.lock",
         "already_installed": already,
+        "installed": installed,
         "dry_run": options.dry_run
     }))
 }
@@ -161,12 +177,18 @@ pub(super) fn install(raw: &[String]) -> Result<Value, Failure> {
             entries = store::read_lock(&lock_path)?;
         }
     }
+    let dependencies = if options.dry_run {
+        Vec::new()
+    } else {
+        install_dependencies(&root, &registry, options.force, false)?
+    };
     if !options.dry_run {
         write_integration(&root)?;
     }
     Ok(json!({
         "status": "ok",
         "operation": "loom_install",
+        "dependencies": dependencies,
         "installed": installed,
         "skipped": skipped,
         "dry_run": options.dry_run
@@ -222,6 +244,11 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
         }
         updated.push(json!({"id": spec.id, "from": current, "to": spec.version}));
     }
+    let dependencies = if options.dry_run {
+        Vec::new()
+    } else {
+        install_dependencies(&root, &registry, options.force, false)?
+    };
     if !options.dry_run {
         write_integration(&root)?;
     }
@@ -800,7 +827,86 @@ fn spec(registry: &Registry, id: &str) -> Result<Spec, Failure> {
         commit: registry.lock["commit"].as_str().unwrap_or("").to_string(),
         files,
         license: registry.license(),
+        requires: unit["requires"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
+}
+
+fn install_tree(
+    root: &Path,
+    registry: &Registry,
+    unit: &Spec,
+    destination: &Path,
+    force: bool,
+    dry_run: bool,
+    visited: &mut HashSet<String>,
+    report: &mut Vec<Value>,
+) -> Result<(), Failure> {
+    if !visited.insert(unit.id.clone()) {
+        return Ok(());
+    }
+    for dependency in &unit.requires {
+        let dependency_spec = spec(registry, dependency)?;
+        let dependency_destination = default_destination(root, &dependency_spec);
+        install_tree(
+            root,
+            registry,
+            &dependency_spec,
+            &dependency_destination,
+            force,
+            dry_run,
+            visited,
+            report,
+        )?;
+    }
+    let already = install_unit(root, unit, destination, force, dry_run)?;
+    let relative = relative(root, destination)?;
+    if !dry_run {
+        record(root, unit, &relative)?;
+    }
+    report.push(json!({
+        "id": unit.id,
+        "version": unit.version,
+        "destination": relative,
+        "already_installed": already
+    }));
+    Ok(())
+}
+
+fn install_dependencies(
+    root: &Path,
+    registry: &Registry,
+    force: bool,
+    dry_run: bool,
+) -> Result<Vec<Value>, Failure> {
+    let entries = store::read_lock(&root.join("loom.lock"))?;
+    let mut visited = HashSet::new();
+    let mut report = Vec::new();
+    for entry in entries {
+        let unit = spec(registry, &entry.id)?;
+        for dependency in &unit.requires {
+            let dependency_spec = spec(registry, dependency)?;
+            let destination = default_destination(root, &dependency_spec);
+            install_tree(
+                root,
+                registry,
+                &dependency_spec,
+                &destination,
+                force,
+                dry_run,
+                &mut visited,
+                &mut report,
+            )?;
+        }
+    }
+    Ok(report)
 }
 
 fn install_unit(

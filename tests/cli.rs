@@ -310,3 +310,59 @@ fn loom_integrate_writes_make_cmake_and_cargo_fragments() {
 
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_add_installs_required_units_and_integrates_them() {
+    let base = std::env::temp_dir().join(format!("loom-deps-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+
+    let base_unit = registry.join("operators/base");
+    fs::create_dir_all(&base_unit).unwrap();
+    fs::write(base_unit.join("README.md"), "# base\n").unwrap();
+    fs::write(base_unit.join("base.h"), "void base(void);\n").unwrap();
+    fs::write(base_unit.join("base.c"), "void base(void) {}\n").unwrap();
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(registry.join("loom.json")).unwrap()).unwrap();
+    manifest["units"][0]["requires"] = json!(["base"]);
+    manifest["units"].as_array_mut().unwrap().push(json!({
+        "id":"base","kind":"operator","version":"0.1.0","path":"operators/base",
+        "summary":"Base","tags":["base"],"applications":["test"]
+    }));
+    fs::write(
+        registry.join("loom.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let mut lock: serde_json::Value =
+        serde_json::from_slice(&fs::read(registry.join("loom.lock")).unwrap()).unwrap();
+    lock["units"]["base"] = json!({"version":"0.1.0","sha256":"x"});
+    fs::write(
+        registry.join("loom.lock"),
+        serde_json::to_vec_pretty(&lock).unwrap(),
+    )
+    .unwrap();
+
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    assert!(project.join("firmware/lib/base/base.c").is_file());
+    let manifest = fs::read_to_string(project.join("loom.toml")).unwrap();
+    assert!(manifest.contains("base"));
+    let make = fs::read_to_string(project.join("firmware/loom/loom.mk")).unwrap();
+    assert!(make.contains("firmware/lib/base/base.c"));
+    let _ = fs::remove_dir_all(&base);
+}
