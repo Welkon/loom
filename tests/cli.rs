@@ -560,3 +560,48 @@ fn loom_publish_and_yank_a_registry() {
     assert!(!registry.join("drivers/p").exists());
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_integrate_apply_inserts_and_replaces_markers() {
+    let base = std::env::temp_dir().join(format!("loom-apply-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+    fs::write(project.join("CMakeLists.txt"), "add_library(app demo.c)\n").unwrap();
+    fs::write(project.join("Makefile"), "all:\n\t@true\n").unwrap();
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    for _ in 0..2 {
+        let apply = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+            .args([
+                "integrate",
+                "--apply",
+                "--target",
+                "app",
+                "--cwd",
+                project.to_str().unwrap(),
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(apply.status.success(), "{apply:?}");
+    }
+    let cmake = fs::read_to_string(project.join("CMakeLists.txt")).unwrap();
+    assert_eq!(cmake.matches("loom_attach(app)").count(), 1);
+    let make = fs::read_to_string(project.join("Makefile")).unwrap();
+    assert_eq!(make.matches("firmware/loom/loom.mk").count(), 1);
+    let _ = fs::remove_dir_all(&base);
+}

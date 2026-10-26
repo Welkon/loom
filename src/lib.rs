@@ -73,7 +73,7 @@ pub fn run(args: &[String]) -> (String, u8) {
                 "loom outdated",
                 "loom verify",
                 "loom guard [--staged|--all|--diff REV] [--path DIR]",
-                "loom integrate [--check] [--cwd DIR]",
+                "loom integrate [--check|--apply] [--target NAME] [--cwd DIR]",
                 "loom index [--out FILE] [--registry DIR|URL] [--cwd DIR]",
                 "loom pack DIR --id ID --kind driver|operator --out DIR",
                 "loom doctor [--cwd DIR]",

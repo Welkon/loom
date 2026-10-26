@@ -78,6 +78,10 @@ Make/CMake/Cargo can include the generated fragments. `loom add`, `remove`,
 `install`, and `update` refresh them automatically. `loom integrate --check`
 fails when they are stale.
 
+`loom integrate --apply` adds a marker block to an existing `Makefile`,
+`CMakeLists.txt`, or `build.rs`; rerunning replaces the block. CMake accepts
+`--target NAME` to emit `loom_attach(NAME)`.
+
 For Cargo, `loom.cargo.rs` exposes `LOOM_SOURCES`, `LOOM_INCLUDE_DIRS`, and
 `build()`; include it from `build.rs` and add `cc` as a build dependency.
 

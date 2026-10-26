@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.0
+
+- Add `loom integrate --apply` for Make, CMake, and Cargo marker blocks.
+
 ## 0.7.0
 
 - Add `loom publish` and `loom yank` for local registry maintenance.

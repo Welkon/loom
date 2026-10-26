@@ -692,11 +692,23 @@ pub(super) fn integrate(raw: &[String]) -> Result<Value, Failure> {
     if !options.dry_run {
         write_files(&files)?;
     }
+    let mut applied = Vec::new();
+    let mut warnings = Vec::new();
+    if options.apply && !options.dry_run {
+        apply_integration(
+            &root,
+            options.target.as_deref(),
+            &mut applied,
+            &mut warnings,
+        )?;
+    }
     Ok(json!({
         "status": "ok",
         "operation": "loom_integrate",
         "check": false,
         "files": files.iter().map(|(path, _)| path.strip_prefix(&root).unwrap_or(path).to_string_lossy().replace('\\', "/")).collect::<Vec<_>>(),
+        "applied": applied,
+        "warnings": warnings,
         "dry_run": options.dry_run
     }))
 }
@@ -716,6 +728,69 @@ fn write_files(files: &[(PathBuf, String)]) -> Result<(), Failure> {
         }
     }
     Ok(())
+}
+
+fn apply_integration(
+    root: &Path,
+    target: Option<&str>,
+    applied: &mut Vec<String>,
+    warnings: &mut Vec<String>,
+) -> Result<(), Failure> {
+    let makefile = root.join("Makefile");
+    if makefile.is_file() {
+        let block = "# loom: begin\ninclude firmware/loom/loom.mk\n# loom: end";
+        if upsert_block(&makefile, "# loom: begin", "# loom: end", block)? {
+            applied.push("Makefile".to_string());
+        }
+    }
+    let cmake = root.join("CMakeLists.txt");
+    if cmake.is_file() {
+        let body = if let Some(target) = target {
+            format!(
+                "# loom: begin\ninclude(${{CMAKE_CURRENT_SOURCE_DIR}}/firmware/loom/loom.cmake)\nloom_attach({target})\n# loom: end"
+            )
+        } else {
+            "# loom: begin\ninclude(${CMAKE_CURRENT_SOURCE_DIR}/firmware/loom/loom.cmake)\n# loom: end".to_string()
+        };
+        if upsert_block(&cmake, "# loom: begin", "# loom: end", &body)? {
+            applied.push("CMakeLists.txt".to_string());
+        }
+    }
+    let build_rs = root.join("build.rs");
+    if build_rs.is_file() {
+        let block = "// loom: begin\ninclude!(\"firmware/loom/loom.cargo.rs\");\n// loom: end";
+        if upsert_block(&build_rs, "// loom: begin", "// loom: end", block)? {
+            applied.push("build.rs".to_string());
+        }
+        let text = fs::read_to_string(&build_rs).map_err(store::io_error)?;
+        if !text.contains("fn main") {
+            let mut next = text;
+            next.push_str("\nfn main() { build(); }\n");
+            fs::write(&build_rs, next).map_err(store::io_error)?;
+            applied.push("build.rs:main".to_string());
+        } else if !text.contains("build();") {
+            warnings.push("build.rs has fn main but does not call build()".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn upsert_block(path: &Path, begin: &str, end: &str, block: &str) -> Result<bool, Failure> {
+    let text = fs::read_to_string(path).map_err(store::io_error)?;
+    let next = if let (Some(start), Some(stop)) = (text.find(begin), text.find(end)) {
+        if stop < start {
+            return Err(("invalid_loom_marker".to_string(), 2));
+        }
+        format!("{}{}{}", &text[..start], block, &text[stop + end.len()..])
+    } else {
+        format!("{}\n{}\n", text.trim_end(), block)
+    };
+    if next != text {
+        fs::write(path, next).map_err(store::io_error)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 fn integration_files(root: &Path) -> Result<Vec<(PathBuf, String)>, Failure> {
@@ -831,6 +906,8 @@ struct Options {
     registry: Option<String>,
     check: bool,
     out: Option<String>,
+    apply: bool,
+    target: Option<String>,
 }
 
 impl Options {
@@ -845,6 +922,8 @@ impl Options {
             registry: None,
             check: false,
             out: None,
+            apply: false,
+            target: None,
         };
         let mut index = start;
         while index < raw.len() {
@@ -872,6 +951,18 @@ impl Options {
                 }
                 "--out" => {
                     options.out = Some(
+                        raw.get(index + 1)
+                            .cloned()
+                            .ok_or_else(|| ("missing_argument".to_string(), 2))?,
+                    );
+                    index += 2;
+                }
+                "--apply" => {
+                    options.apply = true;
+                    index += 1;
+                }
+                "--target" => {
+                    options.target = Some(
                         raw.get(index + 1)
                             .cloned()
                             .ok_or_else(|| ("missing_argument".to_string(), 2))?,
