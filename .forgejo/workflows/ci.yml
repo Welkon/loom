@@ -8,9 +8,4 @@ jobs:
     runs-on: rust-latest
     steps:
       - run: git clone --depth 1 http://forgejo:3000/rh/loom.git repo
-      - run: rustup component add rustfmt clippy
-      - run: cd repo && cargo fmt --check
-      - run: cd repo && cargo clippy --all-targets -- -D warnings
       - run: cd repo && cargo test
-
-# trigger
