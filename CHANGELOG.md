@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.2
+
+- Make the immutable-tag test set its own Git identity, so it passes in a
+  clean container.
+
 ## 0.12.1
 
 - `install` and `update` accept `--index`, so a static registry can restore

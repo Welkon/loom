@@ -616,6 +616,8 @@ fn loom_add_reads_an_immutable_unit_tag() {
     write_registry(&registry, "0.1.0", "old\n");
     for args in [
         vec!["init", "-q"],
+        vec!["config", "user.email", "loom@example.invalid"],
+        vec!["config", "user.name", "loom"],
         vec!["add", "-A"],
         vec!["commit", "-qm", "v1"],
     ] {
