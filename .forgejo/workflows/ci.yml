@@ -8,4 +8,4 @@ jobs:
     runs-on: rust-latest
     steps:
       - run: git clone --depth 1 http://forgejo:3000/rh/loom.git repo
-      - run: cd repo && cargo test
+      - run: cd repo && cargo test --offline
