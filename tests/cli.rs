@@ -427,3 +427,53 @@ fn loom_index_emits_a_registry_index() {
     assert!(index["units"][0]["sha256"].as_str().unwrap().len() > 10);
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_pack_creates_an_addable_registry() {
+    let base = std::env::temp_dir().join(format!("loom-pack-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let source = base.join("source");
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(source.join("tests")).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(source.join("README.md"), "# packed\n").unwrap();
+    fs::write(source.join("LICENSE"), "MIT").unwrap();
+    fs::write(source.join("packed.h"), "void packed(void);\n").unwrap();
+    fs::write(source.join("packed.c"), "void packed(void) {}\n").unwrap();
+    fs::write(
+        source.join("tests/test_packed.c"),
+        "int main(void){return 0;}\n",
+    )
+    .unwrap();
+    let pack = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "pack",
+            source.to_str().unwrap(),
+            "--id",
+            "packed",
+            "--kind",
+            "driver",
+            "--out",
+            registry.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(pack.status.success(), "{pack:?}");
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "packed",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    assert!(project.join("firmware/drivers/packed/packed.c").is_file());
+    let _ = fs::remove_dir_all(&base);
+}

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.0
+
+- Add `loom pack` for producing an addable local registry from a unit.
+
 ## 0.4.0
 
 - Add `loom index` for standalone registry indexes.

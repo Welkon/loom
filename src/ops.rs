@@ -4,6 +4,7 @@ use super::registry::{Registry, UnitFile};
 use super::semver;
 use super::store::{self, LockEntry};
 use serde_json::{Value, json};
+use sha2::Digest;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1126,4 +1127,170 @@ fn remove_empty_dirs(path: &Path) {
         }
     }
     let _ = fs::remove_dir(path);
+}
+
+pub(super) fn pack(raw: &[String]) -> Result<Value, Failure> {
+    let source_arg = raw
+        .first()
+        .filter(|value| !value.starts_with('-'))
+        .ok_or_else(|| ("missing_pack_source".to_string(), 2))?;
+    let value = |name: &str| {
+        let index = raw.iter().position(|item| item == name)?;
+        raw.get(index + 1).cloned()
+    };
+    let id = value("--id").ok_or_else(|| ("missing_pack_id".to_string(), 2))?;
+    let kind = value("--kind").ok_or_else(|| ("missing_pack_kind".to_string(), 2))?;
+    let out = value("--out").ok_or_else(|| ("missing_pack_out".to_string(), 2))?;
+    let version = value("--version").unwrap_or_else(|| "0.1.0".to_string());
+    let summary = value("--summary").unwrap_or_else(|| format!("Packed {id}."));
+    let tags = csv(value("--tags").as_deref());
+    let applications = csv(value("--applications").as_deref());
+    let requires = csv(value("--requires").as_deref());
+    if !id.chars().next().is_some_and(|c| c.is_ascii_lowercase())
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(("invalid_pack_id".to_string(), 2));
+    }
+    if kind != "driver" && kind != "operator" {
+        return Err(("invalid_pack_kind".to_string(), 2));
+    }
+    let source = PathBuf::from(source_arg);
+    if !source.is_dir() || !source.join("README.md").is_file() {
+        return Err(("pack_source_invalid".to_string(), 2));
+    }
+    let mut files = Vec::new();
+    collect_pack_files(&source, "", &mut files)?;
+    if !files.iter().any(|file| file.relative.ends_with(".c"))
+        || !files.iter().any(|file| file.relative.ends_with(".h"))
+    {
+        return Err(("pack_source_invalid".to_string(), 2));
+    }
+    let destination = PathBuf::from(&out);
+    if destination.join("loom.json").exists() {
+        return Err(("pack_output_exists".to_string(), 2));
+    }
+    let directory = format!(
+        "{}s/{id}",
+        if kind == "driver" {
+            "driver"
+        } else {
+            "operator"
+        }
+    );
+    for file in &files {
+        let target = destination.join(&directory).join(&file.relative);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(store::io_error)?;
+        }
+        fs::write(target, &file.bytes).map_err(store::io_error)?;
+    }
+    let license = if source.join("LICENSE").is_file() {
+        fs::read_to_string(source.join("LICENSE")).map_err(store::io_error)?
+    } else if source.join("LICENSE.md").is_file() {
+        fs::read_to_string(source.join("LICENSE.md")).map_err(store::io_error)?
+    } else {
+        return Err(("pack_license_missing".to_string(), 2));
+    };
+    fs::create_dir_all(&destination).map_err(store::io_error)?;
+    fs::write(destination.join("LICENSE"), license).map_err(store::io_error)?;
+    let sha256 = pack_hash(&files);
+    let manifest = json!({
+        "schema": 1,
+        "name": id,
+        "version": version,
+        "license": "see LICENSE",
+        "units": [{
+            "id": id,
+            "kind": kind,
+            "version": version,
+            "path": directory,
+            "summary": summary,
+            "tags": tags,
+            "applications": applications,
+            "requires": requires,
+            "compatibility": {"language": "c99", "alloc": false, "float": false, "blocking": false}
+        }]
+    });
+    let lock = json!({
+        "schema": 1,
+        "source": "loom pack",
+        "ref": version,
+        "commit": "",
+        "units": {id.clone(): {"version": version, "sha256": sha256}}
+    });
+    fs::write(
+        destination.join("loom.json"),
+        serde_json::to_vec_pretty(&manifest)
+            .map_err(|_| ("invalid_pack_manifest".to_string(), 1))?,
+    )
+    .map_err(store::io_error)?;
+    fs::write(
+        destination.join("loom.lock"),
+        serde_json::to_vec_pretty(&lock).map_err(|_| ("invalid_pack_lock".to_string(), 1))?,
+    )
+    .map_err(store::io_error)?;
+    Ok(json!({
+        "status": "ok",
+        "operation": "loom_pack",
+        "id": id,
+        "version": version,
+        "output": out,
+        "files": files.len()
+    }))
+}
+
+fn csv(value: Option<&str>) -> Vec<String> {
+    value
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn collect_pack_files(
+    directory: &Path,
+    prefix: &str,
+    out: &mut Vec<UnitFile>,
+) -> Result<(), Failure> {
+    let mut entries: Vec<_> = fs::read_dir(directory)
+        .map_err(store::io_error)?
+        .map(|entry| entry.map_err(store::io_error))
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == ".git" || name == "build" || name.starts_with('.') {
+            continue;
+        }
+        let relative = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let kind = entry.file_type().map_err(store::io_error)?;
+        if kind.is_dir() {
+            collect_pack_files(&entry.path(), &relative, out)?;
+        } else if kind.is_file() {
+            out.push(UnitFile {
+                relative,
+                bytes: fs::read(entry.path()).map_err(store::io_error)?,
+            });
+        }
+    }
+    Ok(())
+}
+
+fn pack_hash(files: &[UnitFile]) -> String {
+    let mut hasher = sha2::Sha256::new();
+    for file in files {
+        hasher.update(file.relative.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(&file.bytes);
+        hasher.update(b"\0");
+    }
+    format!("{:x}", hasher.finalize())
 }

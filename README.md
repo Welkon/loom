@@ -25,6 +25,15 @@ The CLI never bundles a catalog.
 `~/.cache/loom/registries`). Set `LOOM_REGISTRY_REFRESH=1` to discard the cache
 before the next clone.
 
+## Pack
+
+```sh
+loom pack ./my-unit --id my-unit --kind driver --out ./registry
+```
+
+The output is a small registry containing `loom.json`, `loom.lock`, the unit,
+and its license. `loom add` can consume it directly.
+
 ## Registry index
 
 ```sh

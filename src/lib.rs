@@ -55,6 +55,7 @@ pub fn run(args: &[String]) -> (String, u8) {
         "guard" => ops::guard(&args[2..]),
         "integrate" => ops::integrate(&args[2..]),
         "index" => ops::index(&args[2..]),
+        "pack" => ops::pack(&args[2..]),
         "help" | "--help" | "-h" => Ok(json!({
             "status": "ok",
             "operation": "loom_help",
@@ -70,7 +71,8 @@ pub fn run(args: &[String]) -> (String, u8) {
                 "loom verify",
                 "loom guard [--staged|--all|--diff REV] [--path DIR]",
                 "loom integrate [--check] [--cwd DIR]",
-                "loom index [--out FILE] [--registry DIR|URL] [--cwd DIR]"
+                "loom index [--out FILE] [--registry DIR|URL] [--cwd DIR]",
+                "loom pack DIR --id ID --kind driver|operator --out DIR"
             ]
         })),
         _ => Err(("unknown_loom_command".to_string(), 2)),
