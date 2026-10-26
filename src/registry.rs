@@ -21,6 +21,9 @@ impl Registry {
         if let Some(directory) = explicit {
             candidates.push(PathBuf::from(directory));
         }
+        if let Some(directory) = crate::registry_override() {
+            candidates.insert(0, directory);
+        }
         if let Ok(directory) = std::env::var("EMB_LOOM_REGISTRY")
             && !directory.is_empty()
         {
@@ -30,7 +33,6 @@ impl Registry {
             && let Some(bin) = executable.parent()
             && let Some(package) = bin.parent()
         {
-            candidates.push(package.join("crates/emb-loom/registry"));
             candidates.push(package.join("runtime/loom"));
         }
         candidates.push(cwd.join(".emb-agent/runtime/loom"));

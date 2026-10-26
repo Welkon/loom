@@ -7,7 +7,32 @@ mod store;
 
 use registry::Registry;
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+
+static REGISTRY_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+pub(crate) fn registry_override() -> Option<PathBuf> {
+    REGISTRY_OVERRIDE
+        .get()
+        .and_then(|slot| slot.lock().ok().and_then(|value| value.clone()))
+}
+
+/// Run a command with an explicit registry root, restoring the previous root.
+pub fn run_with_registry(args: &[String], registry: Option<&Path>) -> (String, u8) {
+    let slot = REGISTRY_OVERRIDE.get_or_init(|| Mutex::new(None));
+    let previous = slot
+        .lock()
+        .ok()
+        .map(|mut value| std::mem::replace(&mut *value, registry.map(PathBuf::from)));
+    let result = run(args);
+    if let Some(previous) = previous
+        && let Ok(mut value) = slot.lock()
+    {
+        *value = previous;
+    }
+    result
+}
 
 /// Claim the loom namespace.
 pub fn handles(args: &[String]) -> bool {
