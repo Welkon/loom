@@ -170,8 +170,17 @@ pub(super) fn install(raw: &[String]) -> Result<Value, Failure> {
     let options = Options::parse(raw, 0)?;
     let root = root_for(&options.cwd()?);
     require_project(&root)?;
-    let registry = Registry::discover(&root, options.registry.as_deref())?;
-    let source = Source::Git(&registry);
+    let registry = if options.index.is_none() {
+        Some(Registry::discover(&root, options.registry.as_deref())?)
+    } else {
+        None
+    };
+    let index = options.index.as_deref().map(Index::open).transpose()?;
+    let source = match (&registry, &index) {
+        (_, Some(index)) => Source::Index(index),
+        (Some(registry), None) => Source::Git(registry),
+        _ => return Err(("missing_loom_source".to_string(), 2)),
+    };
     let manifest_path = root.join("loom.toml");
     let units = store::read_manifest(&manifest_path)?;
     let lock_path = root.join("loom.lock");
@@ -230,8 +239,17 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
     let options = Options::parse(raw, usize::from(id.is_some()))?;
     let root = root_for(&options.cwd()?);
     require_project(&root)?;
-    let registry = Registry::discover(&root, options.registry.as_deref())?;
-    let source = Source::Git(&registry);
+    let registry = if options.index.is_none() {
+        Some(Registry::discover(&root, options.registry.as_deref())?)
+    } else {
+        None
+    };
+    let index = options.index.as_deref().map(Index::open).transpose()?;
+    let source = match (&registry, &index) {
+        (_, Some(index)) => Source::Index(index),
+        (Some(registry), None) => Source::Git(registry),
+        _ => return Err(("missing_loom_source".to_string(), 2)),
+    };
     let manifest_path = root.join("loom.toml");
     let units = store::read_manifest(&manifest_path)?;
     let lock_path = root.join("loom.lock");
@@ -241,7 +259,7 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
         if id.as_ref().is_some_and(|wanted| wanted != unit_id) {
             continue;
         }
-        let spec = spec(&registry, unit_id)?;
+        let spec = source.spec(unit_id)?;
         let entry = entries.iter().find(|entry| entry.id == *unit_id).cloned();
         let current = entry
             .as_ref()

@@ -33,6 +33,8 @@ yanked; yanking marks a line, it does not delete history.
 ```sh
 loom add median@0.1.0 --index https://loom.pcbsmt.me
 loom add median --index ./site/dist
+loom install --index https://loom.pcbsmt.me
+loom update median --index https://loom.pcbsmt.me
 ```
 
 The static client uses `curl` for HTTPS. A local directory needs no network.

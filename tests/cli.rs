@@ -835,3 +835,56 @@ fn loom_add_reads_a_cargo_style_static_index() {
     assert!(lock.contains(r#"version = "0.2.0""#), "{lock}");
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_install_reads_a_cargo_style_static_index() {
+    let base = std::env::temp_dir().join(format!("loom-static-install-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let index = base.join("index");
+    let project = base.join("project");
+    fs::create_dir_all(index.join("me/di")).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    let sha = write_static_index(
+        &index,
+        "median",
+        "0.2.0",
+        &[
+            ("README.md", "# median\n\nStatic.\n"),
+            ("median.c", "void median(void) {}\n"),
+            ("median.h", "void median(void);\n"),
+        ],
+    );
+    fs::write(
+        index.join("config.json"),
+        r#"{"dl":"tarballs/{id}-{version}.tar.gz"}"#,
+    )
+    .unwrap();
+    fs::write(
+        index.join("me/di/median"),
+        format!(
+            "{}\n",
+            json!({
+                "id": "median", "version": "0.2.0", "kind": "operator",
+                "path": "operators/filters/median", "requires": [],
+                "sha256": sha, "commit": "abc", "yanked": false
+            })
+        ),
+    )
+    .unwrap();
+    fs::write(project.join("loom.toml"), "[units]\nmedian = \"0.2.0\"\n").unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "install",
+            "--index",
+            index.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .env("LOOM_CACHE_DIR", base.join("cache"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(project.join("firmware/lib/median/median.c").is_file());
+    let _ = fs::remove_dir_all(&base);
+}

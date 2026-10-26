@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1
+
+- `install` and `update` accept `--index`, so a static registry can restore
+  or advance a project without a Git registry.
+
 ## 0.12.0
 
 - Add Cargo-style static registries: per-unit index files, `config.json`,
