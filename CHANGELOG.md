@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+
+- Add semver constraints for `requires`: `^`, `~`, comparators, and exact.
+
 ## 0.9.0
 
 - Resolve `unit/<id>/v<version>` Git tags for historical installs.

@@ -1042,9 +1042,34 @@ fn registry_versions(registry: &Registry, id: &str) -> Vec<String> {
                 .map(|(_, version)| version.to_string())
         })
         .collect();
+    if let Some(unit) = registry.unit(id)
+        && let Some(version) = unit["version"].as_str()
+    {
+        versions.push(version.to_string());
+    }
     versions.sort();
     versions.dedup();
     versions
+}
+
+fn resolve_dependency(registry: &Registry, requirement: &str) -> Result<Spec, Failure> {
+    let (id, range) = requirement
+        .split_once('@')
+        .map_or((requirement, "*"), |(id, range)| (id, range));
+    let mut best: Option<String> = None;
+    for version in registry_versions(registry, id) {
+        if !semver::satisfies(&version, range) {
+            continue;
+        }
+        if best
+            .as_ref()
+            .is_none_or(|current| semver::is_newer(&version, current))
+        {
+            best = Some(version);
+        }
+    }
+    let version = best.ok_or_else(|| ("loom_dependency_unsatisfied".to_string(), 2))?;
+    spec_at(registry, id, &version)
 }
 
 fn spec_at(registry: &Registry, id: &str, version: &str) -> Result<Spec, Failure> {
@@ -1151,7 +1176,7 @@ fn install_tree(
         return Ok(());
     }
     for dependency in &unit.requires {
-        let dependency_spec = spec(registry, dependency)?;
+        let dependency_spec = resolve_dependency(registry, dependency)?;
         let dependency_destination = default_destination(root, &dependency_spec);
         install_tree(
             root,
@@ -1190,7 +1215,7 @@ fn install_dependencies(
     for entry in entries {
         let unit = spec(registry, &entry.id)?;
         for dependency in &unit.requires {
-            let dependency_spec = spec(registry, dependency)?;
+            let dependency_spec = resolve_dependency(registry, dependency)?;
             let destination = default_destination(root, &dependency_spec);
             install_tree(
                 root,
