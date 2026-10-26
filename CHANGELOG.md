@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.0
+
+- Resolve `unit/<id>/v<version>` Git tags for historical installs.
+- List available unit versions in `loom index`.
+
 ## 0.8.0
 
 - Add `loom integrate --apply` for Make, CMake, and Cargo marker blocks.

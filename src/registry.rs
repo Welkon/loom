@@ -135,13 +135,20 @@ fn registry_path(value: &str) -> Result<PathBuf, (String, u8)> {
         let _ = fs::remove_dir_all(&cache);
     }
     if cache.join("loom.json").is_file() {
+        if cache.join(".git/shallow").is_file() {
+            let _ = Command::new("git")
+                .arg("-C")
+                .arg(&cache)
+                .args(["fetch", "--unshallow", "--tags"])
+                .output();
+        }
         return Ok(cache);
     }
     if let Some(parent) = cache.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
     let output = Command::new("git")
-        .args(["clone", "--depth", "1", "--quiet", value])
+        .args(["clone", "--quiet", value])
         .arg(&cache)
         .output()
         .map_err(|_| ("loom_registry_fetch_failed".to_string(), 1))?;

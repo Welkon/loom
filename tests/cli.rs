@@ -605,3 +605,64 @@ fn loom_integrate_apply_inserts_and_replaces_markers() {
     assert_eq!(make.matches("firmware/loom/loom.mk").count(), 1);
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_add_reads_an_immutable_unit_tag() {
+    let base = std::env::temp_dir().join(format!("loom-version-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "old\n");
+    for args in [
+        vec!["init", "-q"],
+        vec!["add", "-A"],
+        vec!["commit", "-qm", "v1"],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .args(&args)
+                .current_dir(&registry)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    assert!(
+        std::process::Command::new("git")
+            .args(["tag", "unit/demo/v0.1.0"])
+            .current_dir(&registry)
+            .status()
+            .unwrap()
+            .success()
+    );
+    write_registry(&registry, "0.2.0", "new\n");
+    for args in [vec!["add", "-A"], vec!["commit", "-qm", "v2"]] {
+        assert!(
+            std::process::Command::new("git")
+                .args(&args)
+                .current_dir(&registry)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo@0.1.0",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    assert_eq!(
+        fs::read_to_string(project.join("firmware/lib/demo/demo.c")).unwrap(),
+        "old\n"
+    );
+    let _ = fs::remove_dir_all(&base);
+}

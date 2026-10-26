@@ -39,10 +39,10 @@ pub(super) fn add(raw: &[String]) -> Result<Value, Failure> {
     let root = root_for(&options.cwd()?);
     require_project(&root)?;
     let registry = Registry::discover(&root, options.registry.as_deref())?;
-    let spec = spec(&registry, id)?;
-    if requested.is_some_and(|version| version != spec.version) {
-        return Err(("loom_version_not_available".to_string(), 2));
-    }
+    let spec = match requested {
+        Some(version) => spec_at(&registry, id, version)?,
+        None => spec(&registry, id)?,
+    };
     let destination = destination(&root, &spec, options.dest.as_deref())?;
     let mut visited = HashSet::new();
     let mut installed = Vec::new();
@@ -622,6 +622,7 @@ pub(super) fn index(raw: &[String]) -> Result<Value, Failure> {
                 "applications": unit["applications"],
                 "compatibility": unit["compatibility"],
                 "requires": unit["requires"].as_array().cloned().unwrap_or_default(),
+                "versions": registry_versions(&registry, id),
                 "sha256": registry.lock["units"]
                     .get(id)
                     .and_then(|entry| entry["sha256"].as_str())
@@ -1031,6 +1032,111 @@ fn spec(registry: &Registry, id: &str) -> Result<Spec, Failure> {
 }
 
 #[allow(clippy::too_many_arguments)]
+fn registry_versions(registry: &Registry, id: &str) -> Vec<String> {
+    let pattern = format!("unit/{id}/v*");
+    let output = git_output(registry.root.as_path(), &["tag", "-l", &pattern]).unwrap_or_default();
+    let mut versions: Vec<String> = String::from_utf8_lossy(&output)
+        .lines()
+        .filter_map(|tag| {
+            tag.rsplit_once("/v")
+                .map(|(_, version)| version.to_string())
+        })
+        .collect();
+    versions.sort();
+    versions.dedup();
+    versions
+}
+
+fn spec_at(registry: &Registry, id: &str, version: &str) -> Result<Spec, Failure> {
+    let current = spec(registry, id)?;
+    if current.version == version {
+        return Ok(current);
+    }
+    let tag = format!("unit/{id}/v{version}");
+    let manifest = git_show(registry.root.as_path(), &format!("{tag}:loom.json"))?;
+    let manifest: Value =
+        serde_json::from_slice(&manifest).map_err(|_| ("invalid_loom_manifest".to_string(), 1))?;
+    let unit = manifest["units"]
+        .as_array()
+        .and_then(|units| units.iter().find(|unit| unit["id"].as_str() == Some(id)))
+        .ok_or_else(|| ("loom_version_not_available".to_string(), 2))?;
+    let path = unit["path"]
+        .as_str()
+        .ok_or_else(|| ("invalid_loom_manifest".to_string(), 1))?;
+    let tree = git_output(
+        registry.root.as_path(),
+        &["ls-tree", "-r", "--name-only", &tag, "--", path],
+    )?;
+    let mut files = Vec::new();
+    for relative in String::from_utf8_lossy(&tree).lines() {
+        let name = relative
+            .strip_prefix(&format!("{path}/"))
+            .unwrap_or(relative)
+            .to_string();
+        files.push(UnitFile {
+            relative: name,
+            bytes: git_show(registry.root.as_path(), &format!("{tag}:{relative}"))?,
+        });
+    }
+    if files.is_empty() {
+        return Err(("loom_version_not_available".to_string(), 2));
+    }
+    let commit = String::from_utf8_lossy(&git_output(
+        registry.root.as_path(),
+        &["rev-parse", &format!("{tag}^{{commit}}")],
+    )?)
+    .trim()
+    .to_string();
+    let license = git_show(registry.root.as_path(), &format!("{tag}:LICENSE")).unwrap_or_default();
+    Ok(Spec {
+        id: id.to_string(),
+        version: version.to_string(),
+        kind: unit["kind"].as_str().unwrap_or("operator").to_string(),
+        sha256: hash_files(&files),
+        source: current.source,
+        commit,
+        files,
+        license: String::from_utf8_lossy(&license).into_owned(),
+        requires: unit["requires"]
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
+}
+
+fn git_output(root: &Path, args: &[&str]) -> Result<Vec<u8>, Failure> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .map_err(|_| ("loom_version_not_available".to_string(), 2))?;
+    if !output.status.success() {
+        return Err(("loom_version_not_available".to_string(), 2));
+    }
+    Ok(output.stdout)
+}
+
+fn git_show(root: &Path, object: &str) -> Result<Vec<u8>, Failure> {
+    git_output(root, &["show", object])
+}
+
+fn hash_files(files: &[UnitFile]) -> String {
+    let mut hasher = sha2::Sha256::new();
+    for file in files {
+        hasher.update(file.relative.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(&file.bytes);
+        hasher.update(b"\0");
+    }
+    format!("{:x}", hasher.finalize())
+}
+
 fn install_tree(
     root: &Path,
     registry: &Registry,
