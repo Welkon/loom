@@ -25,6 +25,15 @@ The CLI never bundles a catalog.
 `~/.cache/loom/registries`). Set `LOOM_REGISTRY_REFRESH=1` to discard the cache
 before the next clone.
 
+## Registry index
+
+```sh
+loom index --out index.json
+```
+
+The index records unit versions, paths, requirements, and SHA-256 values.
+Publish it with the catalog; consumers can use a Git/HTTPS registry URL.
+
 ## Integrate
 
 `loom integrate` writes:
