@@ -477,3 +477,38 @@ fn loom_pack_creates_an_addable_registry() {
     assert!(project.join("firmware/drivers/packed/packed.c").is_file());
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_doctor_checks_hashes_and_integration() {
+    let base = std::env::temp_dir().join(format!("loom-doctor-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    let ok = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args(["doctor", "--cwd", project.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(ok.status.success(), "{ok:?}");
+    fs::write(project.join("firmware/lib/demo/demo.c"), "changed\n").unwrap();
+    let bad = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args(["doctor", "--cwd", project.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(!bad.status.success(), "{bad:?}");
+    let _ = fs::remove_dir_all(&base);
+}

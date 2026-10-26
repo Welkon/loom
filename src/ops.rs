@@ -769,6 +769,33 @@ fn integration_files(root: &Path) -> Result<Vec<(PathBuf, String)>, Failure> {
     ])
 }
 
+fn collect_installed_files(directory: &Path, relative: &str, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    let mut items: Vec<_> = entries.flatten().collect();
+    items.sort_by_key(|entry| entry.file_name());
+    for entry in items {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == "build" || name == ".git" || name == "LICENSE" || name == "PROVENANCE.md" {
+            continue;
+        }
+        let next = if relative.is_empty() {
+            name.clone()
+        } else {
+            format!("{relative}/{name}")
+        };
+        if kind.is_dir() {
+            collect_installed_files(&entry.path(), &next, out);
+        } else if kind.is_file() {
+            out.push(next);
+        }
+    }
+}
+
 fn collect_sources(directory: &Path, relative: &str, out: &mut Vec<String>) {
     let Ok(entries) = fs::read_dir(directory) else {
         return;
@@ -1293,4 +1320,60 @@ fn pack_hash(files: &[UnitFile]) -> String {
         hasher.update(b"\0");
     }
     format!("{:x}", hasher.finalize())
+}
+
+pub(super) fn doctor(raw: &[String]) -> Result<Value, Failure> {
+    let options = Options::parse(raw, 0)?;
+    let root = root_for(&options.cwd()?);
+    let lock = store::read_lock(&root.join("loom.lock"))?;
+    let mut failures = Vec::new();
+    let mut warnings = Vec::new();
+    for entry in &lock {
+        let destination = root.join(&entry.path);
+        if !destination.is_dir() {
+            failures.push(json!({"id": entry.id, "problem": "missing_path", "path": entry.path}));
+            continue;
+        }
+        let mut paths = Vec::new();
+        collect_installed_files(&destination, "", &mut paths);
+        if paths.is_empty() {
+            failures
+                .push(json!({"id": entry.id, "problem": "missing_sources", "path": entry.path}));
+            continue;
+        }
+        let hash = store::hash_installed(&destination, &paths).unwrap_or_default();
+        if hash != entry.sha256 {
+            failures.push(
+                json!({"id": entry.id, "problem": "modified", "path": entry.path,
+                                 "hash": hash, "expected": entry.sha256, "files": paths}),
+            );
+        }
+    }
+    for (path, content) in integration_files(&root)? {
+        if fs::read_to_string(&path).ok().as_deref() != Some(&content) {
+            failures.push(json!({
+                "id": "integration",
+                "problem": "stale",
+                "path": path.strip_prefix(&root).unwrap_or(&path).to_string_lossy().replace('\\', "/")
+            }));
+        }
+    }
+    for file in ["CMakeLists.txt", "Makefile", "build.rs"] {
+        if root.join(file).is_file()
+            && !fs::read_to_string(root.join(file))
+                .unwrap_or_default()
+                .contains("firmware/loom")
+        {
+            warnings.push(json!({"file": file, "problem": "include_missing"}));
+        }
+    }
+    let failed = !failures.is_empty();
+    Ok(json!({
+        "status": if failed { "failed" } else { "ok" },
+        "operation": "loom_doctor",
+        "units": lock.len(),
+        "failures": failures,
+        "warnings": warnings,
+        "error": if failed { json!({"code": "loom_doctor_failed"}) } else { Value::Null }
+    }))
 }

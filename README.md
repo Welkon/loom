@@ -43,6 +43,16 @@ loom index --out index.json
 The index records unit versions, paths, requirements, and SHA-256 values.
 Publish it with the catalog; consumers can use a Git/HTTPS registry URL.
 
+## Doctor
+
+```sh
+loom doctor
+```
+
+Checks installed unit hashes, the generated `firmware/loom` fragments, and
+whether a CMake/Make/Cargo file already includes them. It reports warnings
+for missing build includes and fails on modified units or stale fragments.
+
 ## Integrate
 
 `loom integrate` writes:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0
+
+- Add `loom doctor` for installed hashes, integration fragments, and build
+  include checks.
+
 ## 0.5.1
 
 - Let an explicit `--registry` override the emb-agent runtime fallback.
