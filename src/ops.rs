@@ -1602,6 +1602,51 @@ pub(super) fn doctor(raw: &[String]) -> Result<Value, Failure> {
     }))
 }
 
+fn push_registry(root: &Path, message: &str, sign: bool) -> Result<(), Failure> {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["status", "--porcelain"])
+        .output()
+        .map_err(|_| ("loom_registry_not_git".to_string(), 2))?;
+    if !status.status.success() {
+        return Err(("loom_registry_not_git".to_string(), 2));
+    }
+    if !status.stdout.is_empty() {
+        let add = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["add", "-A"])
+            .status()
+            .map_err(|_| ("loom_publish_push_failed".to_string(), 1))?;
+        if !add.success() {
+            return Err(("loom_publish_push_failed".to_string(), 1));
+        }
+        let mut commit = Command::new("git");
+        commit.arg("-C").arg(root).args(["commit", "-m", message]);
+        if sign {
+            commit.arg("-S");
+        }
+        if !commit
+            .status()
+            .map_err(|_| ("loom_publish_push_failed".to_string(), 1))?
+            .success()
+        {
+            return Err(("loom_publish_push_failed".to_string(), 1));
+        }
+    }
+    let push = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["push", "origin", "HEAD"])
+        .status()
+        .map_err(|_| ("loom_publish_push_failed".to_string(), 1))?;
+    if !push.success() {
+        return Err(("loom_publish_push_failed".to_string(), 1));
+    }
+    Ok(())
+}
+
 pub(super) fn publish(raw: &[String]) -> Result<Value, Failure> {
     let source_arg = raw
         .first()
@@ -1621,6 +1666,8 @@ pub(super) fn publish(raw: &[String]) -> Result<Value, Failure> {
     let applications = csv(value("--applications").as_deref());
     let requires = csv(value("--requires").as_deref());
     let force = raw.iter().any(|item| item == "--force");
+    let push = raw.iter().any(|item| item == "--push");
+    let sign = raw.iter().any(|item| item == "--sign");
     if kind != "driver" && kind != "operator" {
         return Err(("invalid_publish_kind".to_string(), 2));
     }
@@ -1717,8 +1764,11 @@ pub(super) fn publish(raw: &[String]) -> Result<Value, Failure> {
         serde_json::to_vec_pretty(&lock).map_err(|_| ("invalid_publish_lock".to_string(), 1))?,
     )
     .map_err(store::io_error)?;
+    if push {
+        push_registry(&output, &format!("publish {id} {version}"), sign)?;
+    }
     Ok(
-        json!({"status":"ok","operation":"loom_publish","id":id,"version":version,"registry":registry}),
+        json!({"status":"ok","operation":"loom_publish","id":id,"version":version,"registry":registry,"pushed":push}),
     )
 }
 
@@ -1732,6 +1782,8 @@ pub(super) fn yank(raw: &[String]) -> Result<Value, Failure> {
         raw.get(index + 1).cloned()
     };
     let registry = value("--registry").ok_or_else(|| ("missing_yank_registry".to_string(), 2))?;
+    let push = raw.iter().any(|item| item == "--push");
+    let sign = raw.iter().any(|item| item == "--sign");
     let output = PathBuf::from(&registry);
     let manifest_path = output.join("loom.json");
     let mut manifest =

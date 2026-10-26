@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+- Add `publish/yank --push` and optional `--sign` for Git registries.
+
 ## 0.10.0
 
 - Add semver constraints for `requires`: `^`, `~`, comparators, and exact.

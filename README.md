@@ -29,11 +29,13 @@ before the next clone.
 
 ```sh
 loom publish ./unit --id my-unit --kind driver --registry ./registry
-loom yank my-unit --registry ./registry --prune
+loom publish ./unit --id my-unit --kind driver --registry ./registry --push
+loom yank my-unit --registry ./registry --prune --push
 ```
 
 `publish` adds or replaces a unit in an existing registry. `yank` removes it
-from the index and lock; `--prune` also removes its files.
+from the index and lock; `--prune` also removes its files. `--push` commits the
+registry and pushes it; add `--sign` to create a signed Git commit.
 
 ## Pack
 

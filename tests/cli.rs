@@ -666,3 +666,76 @@ fn loom_add_reads_an_immutable_unit_tag() {
     );
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_publish_can_push_to_a_git_registry() {
+    let base = std::env::temp_dir().join(format!("loom-push-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let source = base.join("source");
+    let registry = base.join("registry");
+    let remote = base.join("remote.git");
+    fs::create_dir_all(&source).unwrap();
+    fs::create_dir_all(&registry).unwrap();
+    fs::write(registry.join("README.md"), "registry\n").unwrap();
+    fs::write(source.join("README.md"), "# p\n").unwrap();
+    fs::write(source.join("LICENSE"), "MIT").unwrap();
+    fs::write(source.join("p.h"), "void p(void);\n").unwrap();
+    fs::write(source.join("p.c"), "void p(void) {}\n").unwrap();
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "loom@example.invalid"],
+        vec!["config", "user.name", "loom"],
+        vec!["add", "-A"],
+        vec!["commit", "-qm", "init"],
+    ] {
+        assert!(
+            std::process::Command::new("git")
+                .args(&args)
+                .current_dir(&registry)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "--bare", "-q"])
+            .arg(&remote)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(
+        std::process::Command::new("git")
+            .args(["remote", "add", "origin"])
+            .arg(&remote)
+            .current_dir(&registry)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let publish = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "publish",
+            source.to_str().unwrap(),
+            "--id",
+            "p",
+            "--kind",
+            "driver",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--push",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(publish.status.success(), "{publish:?}");
+    let remote_check = std::process::Command::new("git")
+        .args(["--git-dir"])
+        .arg(&remote)
+        .args(["show", "HEAD:drivers/p/p.c"])
+        .output()
+        .unwrap();
+    assert!(remote_check.status.success(), "{remote_check:?}");
+    let _ = fs::remove_dir_all(&base);
+}
