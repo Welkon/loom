@@ -1377,3 +1377,178 @@ pub(super) fn doctor(raw: &[String]) -> Result<Value, Failure> {
         "error": if failed { json!({"code": "loom_doctor_failed"}) } else { Value::Null }
     }))
 }
+
+pub(super) fn publish(raw: &[String]) -> Result<Value, Failure> {
+    let source_arg = raw
+        .first()
+        .filter(|value| !value.starts_with('-'))
+        .ok_or_else(|| ("missing_publish_source".to_string(), 2))?;
+    let value = |name: &str| {
+        let index = raw.iter().position(|item| item == name)?;
+        raw.get(index + 1).cloned()
+    };
+    let id = value("--id").ok_or_else(|| ("missing_publish_id".to_string(), 2))?;
+    let kind = value("--kind").ok_or_else(|| ("missing_publish_kind".to_string(), 2))?;
+    let registry =
+        value("--registry").ok_or_else(|| ("missing_publish_registry".to_string(), 2))?;
+    let version = value("--version").unwrap_or_else(|| "0.1.0".to_string());
+    let summary = value("--summary").unwrap_or_else(|| format!("Packed {id}."));
+    let tags = csv(value("--tags").as_deref());
+    let applications = csv(value("--applications").as_deref());
+    let requires = csv(value("--requires").as_deref());
+    let force = raw.iter().any(|item| item == "--force");
+    if kind != "driver" && kind != "operator" {
+        return Err(("invalid_publish_kind".to_string(), 2));
+    }
+    let source = PathBuf::from(source_arg);
+    if !source.is_dir() || !source.join("README.md").is_file() {
+        return Err(("publish_source_invalid".to_string(), 2));
+    }
+    let mut files = Vec::new();
+    collect_pack_files(&source, "", &mut files)?;
+    if !files.iter().any(|file| file.relative.ends_with(".c"))
+        || !files.iter().any(|file| file.relative.ends_with(".h"))
+    {
+        return Err(("publish_source_invalid".to_string(), 2));
+    }
+    let output = PathBuf::from(&registry);
+    fs::create_dir_all(&output).map_err(store::io_error)?;
+    let manifest_path = output.join("loom.json");
+    let mut manifest = if manifest_path.is_file() {
+        serde_json::from_slice::<Value>(&fs::read(&manifest_path).map_err(store::io_error)?)
+            .map_err(|_| ("invalid_publish_manifest".to_string(), 1))?
+    } else {
+        json!({"schema":1,"name":"loom-registry","version":version,"license":"see LICENSE","units":[]})
+    };
+    let units = manifest["units"]
+        .as_array_mut()
+        .ok_or_else(|| ("invalid_publish_manifest".to_string(), 1))?;
+    if units
+        .iter()
+        .any(|unit| unit["id"].as_str() == Some(id.as_str()))
+        && !force
+    {
+        return Err(("loom_unit_already_published".to_string(), 2));
+    }
+    let directory = format!(
+        "{}s/{id}",
+        if kind == "driver" {
+            "driver"
+        } else {
+            "operator"
+        }
+    );
+    let target = output.join(&directory);
+    if target.exists() {
+        fs::remove_dir_all(&target).map_err(store::io_error)?;
+    }
+    for file in &files {
+        let path = target.join(&file.relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(store::io_error)?;
+        }
+        fs::write(path, &file.bytes).map_err(store::io_error)?;
+    }
+    if !output.join("LICENSE").is_file() {
+        let license = ["LICENSE", "LICENSE.md"]
+            .iter()
+            .find_map(|name| {
+                let path = source.join(name);
+                path.is_file()
+                    .then(|| fs::read_to_string(path).ok())
+                    .flatten()
+            })
+            .ok_or_else(|| ("publish_license_missing".to_string(), 2))?;
+        fs::write(output.join("LICENSE"), license).map_err(store::io_error)?;
+    }
+    units.retain(|unit| unit["id"] != id);
+    units.push(json!({
+        "id": id,
+        "kind": kind,
+        "version": version,
+        "path": directory,
+        "summary": summary,
+        "tags": tags,
+        "applications": applications,
+        "requires": requires,
+        "compatibility": {"language":"c99","alloc":false,"float":false,"blocking":false}
+    }));
+    units.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest)
+            .map_err(|_| ("invalid_publish_manifest".to_string(), 1))?,
+    )
+    .map_err(store::io_error)?;
+    let lock_path = output.join("loom.lock");
+    let mut lock = if lock_path.is_file() {
+        serde_json::from_slice::<Value>(&fs::read(&lock_path).map_err(store::io_error)?)
+            .map_err(|_| ("invalid_publish_lock".to_string(), 1))?
+    } else {
+        json!({"schema":1,"source":"loom publish","ref":version,"commit":"","units":{}})
+    };
+    lock["units"][&id] = json!({"version":version,"sha256":pack_hash(&files)});
+    fs::write(
+        &lock_path,
+        serde_json::to_vec_pretty(&lock).map_err(|_| ("invalid_publish_lock".to_string(), 1))?,
+    )
+    .map_err(store::io_error)?;
+    Ok(
+        json!({"status":"ok","operation":"loom_publish","id":id,"version":version,"registry":registry}),
+    )
+}
+
+pub(super) fn yank(raw: &[String]) -> Result<Value, Failure> {
+    let id = raw
+        .first()
+        .filter(|value| !value.starts_with('-'))
+        .ok_or_else(|| ("missing_yank_id".to_string(), 2))?;
+    let value = |name: &str| {
+        let index = raw.iter().position(|item| item == name)?;
+        raw.get(index + 1).cloned()
+    };
+    let registry = value("--registry").ok_or_else(|| ("missing_yank_registry".to_string(), 2))?;
+    let output = PathBuf::from(&registry);
+    let manifest_path = output.join("loom.json");
+    let mut manifest =
+        serde_json::from_slice::<Value>(&fs::read(&manifest_path).map_err(store::io_error)?)
+            .map_err(|_| ("invalid_yank_manifest".to_string(), 1))?;
+    let units = manifest["units"]
+        .as_array_mut()
+        .ok_or_else(|| ("invalid_yank_manifest".to_string(), 1))?;
+    let Some(index) = units
+        .iter()
+        .position(|unit| unit["id"].as_str() == Some(id.as_str()))
+    else {
+        return Err(("loom_unit_not_published".to_string(), 2));
+    };
+    let unit = units.remove(index);
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest)
+            .map_err(|_| ("invalid_yank_manifest".to_string(), 1))?,
+    )
+    .map_err(store::io_error)?;
+    let lock_path = output.join("loom.lock");
+    if lock_path.is_file() {
+        let mut lock =
+            serde_json::from_slice::<Value>(&fs::read(&lock_path).map_err(store::io_error)?)
+                .map_err(|_| ("invalid_yank_lock".to_string(), 1))?;
+        if let Some(map) = lock["units"].as_object_mut() {
+            map.remove(id);
+        }
+        fs::write(
+            lock_path,
+            serde_json::to_vec_pretty(&lock).map_err(|_| ("invalid_yank_lock".to_string(), 1))?,
+        )
+        .map_err(store::io_error)?;
+    }
+    if raw.iter().any(|item| item == "--prune")
+        && let Some(path) = unit["path"].as_str()
+    {
+        let _ = fs::remove_dir_all(output.join(path));
+    }
+    Ok(
+        json!({"status":"ok","operation":"loom_yank","id":id,"pruned":raw.iter().any(|item| item == "--prune")}),
+    )
+}

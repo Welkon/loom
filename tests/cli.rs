@@ -512,3 +512,51 @@ fn loom_doctor_checks_hashes_and_integration() {
     assert!(!bad.status.success(), "{bad:?}");
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_publish_and_yank_a_registry() {
+    let base = std::env::temp_dir().join(format!("loom-publish-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let source = base.join("source");
+    let registry = base.join("registry");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("README.md"), "# p\n").unwrap();
+    fs::write(source.join("LICENSE"), "MIT").unwrap();
+    fs::write(source.join("p.h"), "void p(void);\n").unwrap();
+    fs::write(source.join("p.c"), "void p(void) {}\n").unwrap();
+    let publish = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "publish",
+            source.to_str().unwrap(),
+            "--id",
+            "p",
+            "--kind",
+            "driver",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(publish.status.success(), "{publish:?}");
+    let list = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args(["list", "--registry", registry.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(value["count"], 1);
+    let yank = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "yank",
+            "p",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--prune",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(yank.status.success(), "{yank:?}");
+    assert!(!registry.join("drivers/p").exists());
+    let _ = fs::remove_dir_all(&base);
+}

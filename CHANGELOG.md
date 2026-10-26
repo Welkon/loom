@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.0
+
+- Add `loom publish` and `loom yank` for local registry maintenance.
+
 ## 0.6.0
 
 - Add `loom doctor` for installed hashes, integration fragments, and build

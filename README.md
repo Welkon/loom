@@ -25,6 +25,16 @@ The CLI never bundles a catalog.
 `~/.cache/loom/registries`). Set `LOOM_REGISTRY_REFRESH=1` to discard the cache
 before the next clone.
 
+## Publish and yank
+
+```sh
+loom publish ./unit --id my-unit --kind driver --registry ./registry
+loom yank my-unit --registry ./registry --prune
+```
+
+`publish` adds or replaces a unit in an existing registry. `yank` removes it
+from the index and lock; `--prune` also removes its files.
+
 ## Pack
 
 ```sh
