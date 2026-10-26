@@ -86,6 +86,10 @@ loom index --out index.json
 The index records unit versions, paths, requirements, and SHA-256 values.
 Publish it with the catalog; consumers can use a Git/HTTPS registry URL.
 
+`loom index --static --out DIR` exports the same registry as a Cargo-style
+static tree: `config.json`, per-unit index files, and one tarball per current
+unit version. Serve the directory over HTTPS, or pass it to `loom add --index`.
+
 ## Doctor
 
 ```sh

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+- Add `loom index --static --out DIR` to export any Git registry as a static
+  index with deterministic tarballs.
+
 ## 0.13.0
 
 - Read `auth-required` from static `config.json` and send a Bearer token from

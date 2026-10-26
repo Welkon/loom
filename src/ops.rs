@@ -665,6 +665,14 @@ pub(super) fn index(raw: &[String]) -> Result<Value, Failure> {
     let options = Options::parse(raw, 0)?;
     let root = root_for(&options.cwd()?);
     let registry = Registry::discover(&root, options.registry.as_deref())?;
+    if options.static_index {
+        let output = options
+            .out
+            .as_deref()
+            .ok_or_else(|| ("missing_index_output".to_string(), 2))?;
+        let output = store::safe_join(&root, output)?;
+        return super::static_index::write(&registry, &output);
+    }
     let units = registry.manifest["units"]
         .as_array()
         .ok_or_else(|| ("invalid_loom_manifest".to_string(), 1))?;
@@ -972,6 +980,7 @@ struct Options {
     out: Option<String>,
     apply: bool,
     target: Option<String>,
+    static_index: bool,
 }
 
 impl Options {
@@ -990,6 +999,7 @@ impl Options {
             out: None,
             apply: false,
             target: None,
+            static_index: false,
         };
         let mut index = start;
         while index < raw.len() {
@@ -1013,6 +1023,10 @@ impl Options {
                 }
                 "--check" => {
                     options.check = true;
+                    index += 1;
+                }
+                "--static" => {
+                    options.static_index = true;
                     index += 1;
                 }
                 "--out" => {
@@ -1063,7 +1077,7 @@ impl Options {
     }
 }
 
-fn spec(registry: &Registry, id: &str) -> Result<Spec, Failure> {
+pub(super) fn spec(registry: &Registry, id: &str) -> Result<Spec, Failure> {
     let unit = registry
         .unit(id)
         .ok_or_else(|| ("unknown_loom_unit".to_string(), 2))?;

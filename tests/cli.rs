@@ -890,3 +890,49 @@ fn loom_install_reads_a_cargo_style_static_index() {
     assert!(project.join("firmware/lib/median/median.c").is_file());
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_index_static_exports_an_installable_registry() {
+    let base = std::env::temp_dir().join(format!("loom-static-export-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "static\n");
+    let export = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "index",
+            "--static",
+            "--out",
+            "static",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            registry.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(export.status.success(), "{export:?}");
+    assert!(registry.join("static/de/mo/demo").is_file());
+    assert!(registry.join("static/tarballs/demo-0.1.0.tar.gz").is_file());
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo",
+            "--index",
+            registry.join("static").to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .env("LOOM_CACHE_DIR", base.join("cache"))
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    assert_eq!(
+        fs::read_to_string(project.join("firmware/lib/demo/demo.c")).unwrap(),
+        "static\n"
+    );
+    let _ = fs::remove_dir_all(&base);
+}

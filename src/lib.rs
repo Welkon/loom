@@ -5,6 +5,7 @@ mod ops;
 mod registry;
 mod semver;
 mod spec;
+mod static_index;
 mod store;
 
 use registry::Registry;
@@ -76,7 +77,7 @@ pub fn run(args: &[String]) -> (String, u8) {
                 "loom verify",
                 "loom guard [--staged|--all|--diff REV] [--path DIR]",
                 "loom integrate [--check|--apply] [--target NAME] [--cwd DIR]",
-                "loom index [--out FILE] [--registry DIR|URL] [--cwd DIR]",
+                "loom index [--static --out DIR] [--registry DIR|URL] [--cwd DIR]",
                 "loom pack DIR --id ID --kind driver|operator --out DIR",
                 "loom doctor [--cwd DIR]",
                 "loom publish DIR --id ID --kind driver|operator --registry DIR",
