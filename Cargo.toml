@@ -1,0 +1,19 @@
+[package]
+name = "loom"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+edition = "2024"
+publish = false
+description = "Pinned embedded drivers and algorithms"
+
+[[bin]]
+name = "loom"
+path = "src/bin/loom.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
