@@ -1030,6 +1030,7 @@ fn spec(registry: &Registry, id: &str) -> Result<Spec, Failure> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn install_tree(
     root: &Path,
     registry: &Registry,
