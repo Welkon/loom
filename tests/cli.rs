@@ -398,3 +398,32 @@ fn loom_reads_a_git_registry_url() {
     assert_eq!(value["count"], 1);
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_index_emits_a_registry_index() {
+    let base = std::env::temp_dir().join(format!("loom-index-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "index",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--out",
+            "index.json",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let index: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("index.json")).unwrap()).unwrap();
+    assert_eq!(index["units"][0]["id"], "demo");
+    assert!(index["units"][0]["sha256"].as_str().unwrap().len() > 10);
+    let _ = fs::remove_dir_all(&base);
+}

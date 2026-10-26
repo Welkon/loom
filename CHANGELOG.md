@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- Add `loom index` for standalone registry indexes.
+
 ## 0.3.0
 
 - Accept Git/HTTPS/file registry URLs with a local clone cache.

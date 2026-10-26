@@ -599,6 +599,67 @@ fn scan_paths(root: &Path, roots: &[String]) -> Vec<String> {
     paths
 }
 
+pub(super) fn index(raw: &[String]) -> Result<Value, Failure> {
+    let options = Options::parse(raw, 0)?;
+    let root = root_for(&options.cwd()?);
+    let registry = Registry::discover(&root, options.registry.as_deref())?;
+    let units = registry.manifest["units"]
+        .as_array()
+        .ok_or_else(|| ("invalid_loom_manifest".to_string(), 1))?;
+    let mut entries: Vec<Value> = units
+        .iter()
+        .map(|unit| {
+            let id = unit["id"].as_str().unwrap_or("");
+            json!({
+                "id": id,
+                "kind": unit["kind"],
+                "version": unit["version"],
+                "path": unit["path"],
+                "summary": unit["summary"],
+                "tags": unit["tags"],
+                "applications": unit["applications"],
+                "compatibility": unit["compatibility"],
+                "requires": unit["requires"].as_array().cloned().unwrap_or_default(),
+                "sha256": registry.lock["units"]
+                    .get(id)
+                    .and_then(|entry| entry["sha256"].as_str())
+                    .unwrap_or("")
+            })
+        })
+        .collect();
+    entries.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
+    let index = json!({
+        "schema": 1,
+        "source": registry.lock["source"],
+        "ref": registry.lock["ref"],
+        "commit": registry.lock["commit"],
+        "license": registry.manifest["license"],
+        "units": entries
+    });
+    if let Some(relative) = &options.out {
+        let output = store::safe_join(&root, relative)?;
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).map_err(store::io_error)?;
+        }
+        fs::write(
+            &output,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&index)
+                    .map_err(|_| ("invalid_loom_index".to_string(), 1))?
+            ),
+        )
+        .map_err(store::io_error)?;
+        return Ok(json!({
+            "status": "ok",
+            "operation": "loom_index",
+            "output": output.strip_prefix(&root).unwrap_or(&output).to_string_lossy().replace('\\', "/"),
+            "count": index["units"].as_array().map_or(0, Vec::len)
+        }));
+    }
+    Ok(json!({"status": "ok", "operation": "loom_index", "index": index}))
+}
+
 pub(super) fn integrate(raw: &[String]) -> Result<Value, Failure> {
     let options = Options::parse(raw, 0)?;
     let root = root_for(&options.cwd()?);
@@ -741,6 +802,7 @@ struct Options {
     locked: bool,
     registry: Option<String>,
     check: bool,
+    out: Option<String>,
 }
 
 impl Options {
@@ -754,6 +816,7 @@ impl Options {
             locked: false,
             registry: None,
             check: false,
+            out: None,
         };
         let mut index = start;
         while index < raw.len() {
@@ -778,6 +841,14 @@ impl Options {
                 "--check" => {
                     options.check = true;
                     index += 1;
+                }
+                "--out" => {
+                    options.out = Some(
+                        raw.get(index + 1)
+                            .cloned()
+                            .ok_or_else(|| ("missing_argument".to_string(), 2))?,
+                    );
+                    index += 2;
                 }
                 "--cwd" | "--dest" | "--registry" => {
                     let value = raw
