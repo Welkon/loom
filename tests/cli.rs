@@ -366,3 +366,35 @@ fn loom_add_installs_required_units_and_integrates_them() {
     assert!(make.contains("firmware/lib/base/base.c"));
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_reads_a_git_registry_url() {
+    let base = std::env::temp_dir().join(format!("loom-git-registry-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    fs::create_dir_all(&registry).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+    for args in [
+        vec!["init", "-q"],
+        vec!["config", "user.email", "loom@example.invalid"],
+        vec!["config", "user.name", "loom"],
+        vec!["add", "-A"],
+        vec!["commit", "-qm", "fixture"],
+    ] {
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .current_dir(&registry)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    let url = format!("file://{}", registry.display());
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args(["list", "--registry", &url, "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["count"], 1);
+    let _ = fs::remove_dir_all(&base);
+}

@@ -20,6 +20,11 @@ A registry is a directory with `loom.json` and `loom.lock`. Select it with
 `--registry DIR`, `EMB_LOOM_REGISTRY`, or the package/project fallback paths.
 The CLI never bundles a catalog.
 
+`--registry` also accepts a Git URL (`https://`, `ssh://`, `git@`, or
+`file://`). The registry is cloned into `$XDG_CACHE_HOME/loom/registries` (or
+`~/.cache/loom/registries`). Set `LOOM_REGISTRY_REFRESH=1` to discard the cache
+before the next clone.
+
 ## Integrate
 
 `loom integrate` writes:

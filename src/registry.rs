@@ -1,8 +1,10 @@
 //! Runtime registry loader. The C units stay on disk, not in the binary.
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub(super) struct UnitFile {
     pub relative: String,
@@ -19,7 +21,7 @@ impl Registry {
     pub fn discover(cwd: &Path, explicit: Option<&str>) -> Result<Self, (String, u8)> {
         let mut candidates = Vec::new();
         if let Some(directory) = explicit {
-            candidates.push(PathBuf::from(directory));
+            candidates.push(registry_path(directory)?);
         }
         if let Some(directory) = crate::registry_override() {
             candidates.insert(0, directory);
@@ -27,7 +29,7 @@ impl Registry {
         if let Ok(directory) = std::env::var("EMB_LOOM_REGISTRY")
             && !directory.is_empty()
         {
-            candidates.push(PathBuf::from(directory));
+            candidates.push(registry_path(&directory)?);
         }
         if let Ok(executable) = std::env::current_exe()
             && let Some(bin) = executable.parent()
@@ -120,6 +122,63 @@ fn collect(root: &Path, directory: &Path, files: &mut Vec<UnitFile>) -> Result<(
         }
     }
     Ok(())
+}
+
+fn registry_path(value: &str) -> Result<PathBuf, (String, u8)> {
+    if !is_remote(value) {
+        return Ok(PathBuf::from(value));
+    }
+    let cache = cache_root().join(hex(Sha256::digest(value.as_bytes())));
+    if cache.join("loom.json").is_file()
+        && std::env::var("LOOM_REGISTRY_REFRESH").as_deref() == Ok("1")
+    {
+        let _ = fs::remove_dir_all(&cache);
+    }
+    if cache.join("loom.json").is_file() {
+        return Ok(cache);
+    }
+    if let Some(parent) = cache.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    let output = Command::new("git")
+        .args(["clone", "--depth", "1", "--quiet", value])
+        .arg(&cache)
+        .output()
+        .map_err(|_| ("loom_registry_fetch_failed".to_string(), 1))?;
+    if !output.status.success() || !cache.join("loom.json").is_file() {
+        return Err(("loom_registry_fetch_failed".to_string(), 1));
+    }
+    Ok(cache)
+}
+
+fn is_remote(value: &str) -> bool {
+    value.starts_with("http://")
+        || value.starts_with("https://")
+        || value.starts_with("ssh://")
+        || value.starts_with("git@")
+        || value.starts_with("file://")
+}
+
+fn cache_root() -> PathBuf {
+    if let Ok(value) = std::env::var("XDG_CACHE_HOME")
+        && !value.is_empty()
+    {
+        return PathBuf::from(value).join("loom/registries");
+    }
+    if let Ok(value) = std::env::var("HOME")
+        && !value.is_empty()
+    {
+        return PathBuf::from(value).join(".cache/loom/registries");
+    }
+    std::env::temp_dir().join("loom/registries")
+}
+
+fn hex(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn io_error(error: std::io::Error) -> (String, u8) {

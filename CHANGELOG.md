@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Accept Git/HTTPS/file registry URLs with a local clone cache.
+- Add `LOOM_REGISTRY_REFRESH=1` for cache refresh.
+
 ## 0.2.0
 
 - Resolve `requires` recursively when adding, installing, or updating units.
