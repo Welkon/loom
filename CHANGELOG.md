@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.3
+
+- Reject unsafe unit names, versions, and non-hex checksums from static
+  indexes before building a cache path.
+
 ## 0.12.2
 
 - Make the immutable-tag test set its own Git identity, so it passes in a

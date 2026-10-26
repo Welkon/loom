@@ -103,6 +103,9 @@ impl Index {
     }
 
     fn entries(&self, id: &str) -> Result<Vec<Value>, Failure> {
+        if !safe_component(id) {
+            return Err(("invalid_loom_unit".to_string(), 2));
+        }
         let text = self.read(&index_path(id))?;
         let mut entries = Vec::new();
         for line in String::from_utf8_lossy(&text).lines() {
@@ -125,9 +128,15 @@ impl Index {
         let version = entry["version"]
             .as_str()
             .ok_or_else(|| ("invalid_loom_index".to_string(), 1))?;
+        if !safe_component(version) {
+            return Err(("invalid_loom_index".to_string(), 1));
+        }
         let sha256 = entry["sha256"]
             .as_str()
             .ok_or_else(|| ("invalid_loom_index".to_string(), 1))?;
+        if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(("invalid_loom_index".to_string(), 1));
+        }
         let url = self.tarball_url(id, version);
         let tarball = self.tarball(&url, sha256)?;
         let (files, license) = unpack(id, version, &tarball)?;
@@ -229,6 +238,16 @@ impl Index {
         }
         Ok(output.stdout)
     }
+}
+
+fn safe_component(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains(['/', '\\'])
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+'))
 }
 
 fn index_path(id: &str) -> String {
