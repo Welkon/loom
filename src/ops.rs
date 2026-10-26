@@ -1,7 +1,9 @@
 //! Project install, remove, install, update, outdated, verify, and search.
 
+use super::index::Index;
 use super::registry::{Registry, UnitFile};
 use super::semver;
+use super::spec::Spec;
 use super::store::{self, LockEntry};
 use serde_json::{Value, json};
 use sha2::Digest;
@@ -12,16 +14,32 @@ use std::process::Command;
 
 type Failure = (String, u8);
 
-struct Spec {
-    id: String,
-    version: String,
-    kind: String,
-    sha256: String,
-    source: String,
-    commit: String,
-    files: Vec<UnitFile>,
-    license: String,
-    requires: Vec<String>,
+enum Source<'a> {
+    Git(&'a Registry),
+    Index(&'a Index),
+}
+
+impl Source<'_> {
+    fn spec(&self, id: &str) -> Result<Spec, Failure> {
+        match self {
+            Self::Git(registry) => spec(registry, id),
+            Self::Index(index) => index.spec(id),
+        }
+    }
+
+    fn spec_at(&self, id: &str, version: &str) -> Result<Spec, Failure> {
+        match self {
+            Self::Git(registry) => spec_at(registry, id, version),
+            Self::Index(index) => index.spec_at(id, version),
+        }
+    }
+
+    fn resolve_dependency(&self, requirement: &str) -> Result<Spec, Failure> {
+        match self {
+            Self::Git(registry) => resolve_dependency(registry, requirement),
+            Self::Index(index) => index.resolve_dependency(requirement),
+        }
+    }
 }
 
 pub(super) fn add(raw: &[String]) -> Result<Value, Failure> {
@@ -38,17 +56,27 @@ pub(super) fn add(raw: &[String]) -> Result<Value, Failure> {
     let options = Options::parse(raw, 1)?;
     let root = root_for(&options.cwd()?);
     require_project(&root)?;
-    let registry = Registry::discover(&root, options.registry.as_deref())?;
+    let registry = if options.index.is_none() {
+        Some(Registry::discover(&root, options.registry.as_deref())?)
+    } else {
+        None
+    };
+    let index = options.index.as_deref().map(Index::open).transpose()?;
+    let source = match (&registry, &index) {
+        (_, Some(index)) => Source::Index(index),
+        (Some(registry), None) => Source::Git(registry),
+        _ => return Err(("missing_loom_source".to_string(), 2)),
+    };
     let spec = match requested {
-        Some(version) => spec_at(&registry, id, version)?,
-        None => spec(&registry, id)?,
+        Some(version) => source.spec_at(id, version)?,
+        None => source.spec(id)?,
     };
     let destination = destination(&root, &spec, options.dest.as_deref())?;
     let mut visited = HashSet::new();
     let mut installed = Vec::new();
     install_tree(
         &root,
-        &registry,
+        &source,
         &spec,
         &destination,
         options.force,
@@ -143,6 +171,7 @@ pub(super) fn install(raw: &[String]) -> Result<Value, Failure> {
     let root = root_for(&options.cwd()?);
     require_project(&root)?;
     let registry = Registry::discover(&root, options.registry.as_deref())?;
+    let source = Source::Git(&registry);
     let manifest_path = root.join("loom.toml");
     let units = store::read_manifest(&manifest_path)?;
     let lock_path = root.join("loom.lock");
@@ -150,7 +179,7 @@ pub(super) fn install(raw: &[String]) -> Result<Value, Failure> {
     let mut installed = 0u64;
     let mut skipped = 0u64;
     for (id, version) in units {
-        let spec = spec(&registry, &id)?;
+        let spec = source.spec(&id)?;
         if version != spec.version {
             return Err(("loom_version_not_available".to_string(), 2));
         }
@@ -181,7 +210,7 @@ pub(super) fn install(raw: &[String]) -> Result<Value, Failure> {
     let dependencies = if options.dry_run {
         Vec::new()
     } else {
-        install_dependencies(&root, &registry, options.force, false)?
+        install_dependencies(&root, &source, options.force, false)?
     };
     if !options.dry_run {
         write_integration(&root)?;
@@ -202,6 +231,7 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
     let root = root_for(&options.cwd()?);
     require_project(&root)?;
     let registry = Registry::discover(&root, options.registry.as_deref())?;
+    let source = Source::Git(&registry);
     let manifest_path = root.join("loom.toml");
     let units = store::read_manifest(&manifest_path)?;
     let lock_path = root.join("loom.lock");
@@ -248,7 +278,7 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
     let dependencies = if options.dry_run {
         Vec::new()
     } else {
-        install_dependencies(&root, &registry, options.force, false)?
+        install_dependencies(&root, &source, options.force, false)?
     };
     if !options.dry_run {
         write_integration(&root)?;
@@ -906,6 +936,7 @@ struct Options {
     prune: bool,
     locked: bool,
     registry: Option<String>,
+    index: Option<String>,
     check: bool,
     out: Option<String>,
     apply: bool,
@@ -922,6 +953,7 @@ impl Options {
             prune: false,
             locked: false,
             registry: None,
+            index: None,
             check: false,
             out: None,
             apply: false,
@@ -971,7 +1003,7 @@ impl Options {
                     );
                     index += 2;
                 }
-                "--cwd" | "--dest" | "--registry" => {
+                "--cwd" | "--dest" | "--registry" | "--index" => {
                     let value = raw
                         .get(index + 1)
                         .cloned()
@@ -979,6 +1011,7 @@ impl Options {
                     match raw[index].as_str() {
                         "--cwd" => options.cwd = Some(value),
                         "--dest" => options.dest = Some(value),
+                        "--index" => options.index = Some(value),
                         _ => options.registry = Some(value),
                     }
                     index += 2;
@@ -1162,9 +1195,10 @@ fn hash_files(files: &[UnitFile]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn install_tree(
     root: &Path,
-    registry: &Registry,
+    source: &Source<'_>,
     unit: &Spec,
     destination: &Path,
     force: bool,
@@ -1176,11 +1210,11 @@ fn install_tree(
         return Ok(());
     }
     for dependency in &unit.requires {
-        let dependency_spec = resolve_dependency(registry, dependency)?;
+        let dependency_spec = source.resolve_dependency(dependency)?;
         let dependency_destination = default_destination(root, &dependency_spec);
         install_tree(
             root,
-            registry,
+            source,
             &dependency_spec,
             &dependency_destination,
             force,
@@ -1205,7 +1239,7 @@ fn install_tree(
 
 fn install_dependencies(
     root: &Path,
-    registry: &Registry,
+    source: &Source<'_>,
     force: bool,
     dry_run: bool,
 ) -> Result<Vec<Value>, Failure> {
@@ -1213,13 +1247,13 @@ fn install_dependencies(
     let mut visited = HashSet::new();
     let mut report = Vec::new();
     for entry in entries {
-        let unit = spec(registry, &entry.id)?;
+        let unit = source.spec(&entry.id)?;
         for dependency in &unit.requires {
-            let dependency_spec = resolve_dependency(registry, dependency)?;
+            let dependency_spec = source.resolve_dependency(dependency)?;
             let destination = default_destination(root, &dependency_spec);
             install_tree(
                 root,
-                registry,
+                source,
                 &dependency_spec,
                 &destination,
                 force,
@@ -1824,7 +1858,10 @@ pub(super) fn yank(raw: &[String]) -> Result<Value, Failure> {
     {
         let _ = fs::remove_dir_all(output.join(path));
     }
+    if push {
+        push_registry(&output, &format!("yank {id}"), sign)?;
+    }
     Ok(
-        json!({"status":"ok","operation":"loom_yank","id":id,"pruned":raw.iter().any(|item| item == "--prune")}),
+        json!({"status":"ok","operation":"loom_yank","id":id,"pruned":raw.iter().any(|item| item == "--prune"),"pushed":push}),
     )
 }

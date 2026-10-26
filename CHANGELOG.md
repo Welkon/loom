@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0
+
+- Add Cargo-style static registries: per-unit index files, `config.json`,
+  version tarballs, SHA-256 checks, and a content-addressed cache.
+- `loom add ID --index URL|DIR` installs from a static index without cloning
+  the registry.
+
 ## 0.11.0
 
 - Add `publish/yank --push` and optional `--sign` for Git registries.

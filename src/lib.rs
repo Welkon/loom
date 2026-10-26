@@ -1,8 +1,10 @@
 //! `loom` registry view and project package commands.
 
+mod index;
 mod ops;
 mod registry;
 mod semver;
+mod spec;
 mod store;
 
 use registry::Registry;
@@ -66,7 +68,7 @@ pub fn run(args: &[String]) -> (String, u8) {
                 "loom list [--installed] [--kind KIND] [--tag TAG]",
                 "loom show ID [--readme]",
                 "loom search QUERY",
-                "loom add ID[@VERSION] [--dest DIR] [--force] [--dry-run]",
+                "loom add ID[@VERSION] [--index URL|DIR] [--dest DIR] [--force] [--dry-run]",
                 "loom remove ID [--prune] [--force] [--dry-run]",
                 "loom install [--locked] [--force] [--dry-run]",
                 "loom update [ID] [--force] [--dry-run]",

@@ -739,3 +739,99 @@ fn loom_publish_can_push_to_a_git_registry() {
     assert!(remote_check.status.success(), "{remote_check:?}");
     let _ = fs::remove_dir_all(&base);
 }
+
+fn write_static_index(root: &Path, id: &str, version: &str, files: &[(&str, &str)]) -> String {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write as _;
+    use tar::{Builder, Header};
+
+    let tarballs = root.join("tarballs");
+    fs::create_dir_all(&tarballs).unwrap();
+    let tarball_path = tarballs.join(format!("{id}-{version}.tar.gz"));
+    let writer = GzEncoder::new(
+        fs::File::create(&tarball_path).unwrap(),
+        Compression::default(),
+    );
+    let mut builder = Builder::new(writer);
+    let prefix = format!("{id}-{version}");
+    for (relative, content) in files {
+        let mut header = Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder
+            .append_data(
+                &mut header,
+                format!("{prefix}/{relative}"),
+                content.as_bytes(),
+            )
+            .unwrap();
+    }
+    let writer = builder.into_inner().unwrap();
+    let mut writer = writer;
+    writer.flush().unwrap();
+    drop(writer);
+    let bytes = fs::read(&tarball_path).unwrap();
+    format!("{:x}", Sha256::digest(&bytes))
+}
+
+#[test]
+fn loom_add_reads_a_cargo_style_static_index() {
+    use serde_json::json;
+
+    let base = std::env::temp_dir().join(format!("loom-static-index-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let index = base.join("index");
+    let project = base.join("project");
+    fs::create_dir_all(index.join("me/di")).unwrap();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("loom.toml"), "[units]\n").unwrap();
+    let sha = write_static_index(
+        &index,
+        "median",
+        "0.2.0",
+        &[
+            ("README.md", "# median\n\nStatic.\n"),
+            ("median.c", "void median(void) {}\n"),
+            ("median.h", "void median(void);\n"),
+        ],
+    );
+    fs::write(
+        index.join("config.json"),
+        json!({"dl": "tarballs/{id}-{version}.tar.gz"}).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        index.join("me/di/median"),
+        json!({
+            "id": "median", "version": "0.2.0", "kind": "operator",
+            "path": "operators/filters/median", "requires": [],
+            "sha256": sha, "commit": "abc", "yanked": false
+        })
+        .to_string()
+            + "\n",
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "median",
+            "--index",
+            index.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .env("LOOM_CACHE_DIR", base.join("cache"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(
+        fs::read_to_string(project.join("firmware/lib/median/median.c")).unwrap(),
+        "void median(void) {}\n"
+    );
+    let lock = fs::read_to_string(project.join("loom.lock")).unwrap();
+    assert!(lock.contains(r#"version = "0.2.0""#), "{lock}");
+    let _ = fs::remove_dir_all(&base);
+}

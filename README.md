@@ -9,10 +9,33 @@ at <https://git.pcbsmt.me/rh/emb-loom>, and the site at
 ```sh
 loom search "load cell"
 loom add ads1115
+loom add ads1115 --index https://loom.pcbsmt.me
 loom integrate
 loom verify
 loom guard --staged
 ```
+
+## Static index
+
+`--index` uses the same layout as a sparse Cargo registry:
+
+```
+config.json
+me/di/median
+tarballs/median-0.2.0.tar.gz
+```
+
+Each index file has one JSON line per version. Each line carries the tarball
+SHA-256. Tarballs are cached under `$XDG_CACHE_HOME/loom/tarballs` by hash, so a
+version is downloaded once. Old versions stay installable until they are
+yanked; yanking marks a line, it does not delete history.
+
+```sh
+loom add median@0.1.0 --index https://loom.pcbsmt.me
+loom add median --index ./site/dist
+```
+
+The static client uses `curl` for HTTPS. A local directory needs no network.
 
 ## Registry
 
@@ -20,7 +43,9 @@ A registry is a directory with `loom.json` and `loom.lock`. Select it with
 `--registry DIR`, `EMB_LOOM_REGISTRY`, or the package/project fallback paths.
 The CLI never bundles a catalog.
 
-`--registry` also accepts a Git URL (`https://`, `ssh://`, `git@`, or
+`--index` reads a Cargo-style static registry: per-unit index files,
+`config.json`, and one tarball per version. It accepts an HTTPS URL or a local
+directory. `--registry` also accepts a Git URL (`https://`, `ssh://`, `git@`, or
 `file://`). The registry is cloned into `$XDG_CACHE_HOME/loom/registries` (or
 `~/.cache/loom/registries`). Set `LOOM_REGISTRY_REFRESH=1` to discard the cache
 before the next clone.
