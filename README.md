@@ -90,6 +90,9 @@ Publish it with the catalog; consumers can use a Git/HTTPS registry URL.
 static tree: `config.json`, per-unit index files, and one tarball per current
 unit version. Serve the directory over HTTPS, or pass it to `loom add --index`.
 
+`loom yank ID@VERSION --index DIR` marks that version yanked in the static
+index. The tarball and index line stay; `--undo` clears the flag.
+
 ## Doctor
 
 ```sh

@@ -936,3 +936,85 @@ fn loom_index_static_exports_an_installable_registry() {
     );
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_yank_marks_a_static_index_without_deleting_the_tarball() {
+    let base = std::env::temp_dir().join(format!("loom-static-yank-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "yank\n");
+    let out = registry.join("static");
+    let export = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "index",
+            "--static",
+            "--out",
+            "static",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            registry.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(export.status.success(), "{export:?}");
+    let yank = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "yank",
+            "demo@0.1.0",
+            "--index",
+            out.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(yank.status.success(), "{yank:?}");
+    let line = fs::read_to_string(out.join("de/mo/demo")).unwrap();
+    assert!(line.contains(r#""yanked":true"#), "{line}");
+    assert!(out.join("tarballs/demo-0.1.0.tar.gz").is_file());
+    let rejected = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo@0.1.0",
+            "--index",
+            out.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(rejected.status.code(), Some(2), "{rejected:?}");
+    let value: serde_json::Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "loom_version_yanked");
+    let undo = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "yank",
+            "demo@0.1.0",
+            "--index",
+            out.to_str().unwrap(),
+            "--undo",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(undo.status.success(), "{undo:?}");
+    let added = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo@0.1.0",
+            "--index",
+            out.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .env("LOOM_CACHE_DIR", base.join("cache"))
+        .output()
+        .unwrap();
+    assert!(added.status.success(), "{added:?}");
+    let _ = fs::remove_dir_all(&base);
+}

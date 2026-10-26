@@ -1862,6 +1862,17 @@ pub(super) fn yank(raw: &[String]) -> Result<Value, Failure> {
         let index = raw.iter().position(|item| item == name)?;
         raw.get(index + 1).cloned()
     };
+    if let Some(base) = value("--index") {
+        let (unit, version) = id
+            .split_once('@')
+            .ok_or_else(|| ("missing_yank_version".to_string(), 2))?;
+        return super::static_index::yank(
+            Path::new(&base),
+            unit,
+            version,
+            raw.iter().any(|item| item == "--undo"),
+        );
+    }
     let registry = value("--registry").ok_or_else(|| ("missing_yank_registry".to_string(), 2))?;
     let push = raw.iter().any(|item| item == "--push");
     let sign = raw.iter().any(|item| item == "--sign");

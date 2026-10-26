@@ -67,6 +67,49 @@ pub(super) fn write(registry: &Registry, output: &Path) -> Result<Value, Failure
     }))
 }
 
+pub(super) fn yank(root: &Path, id: &str, version: &str, undo: bool) -> Result<Value, Failure> {
+    if !safe_component(id) || !safe_component(version) {
+        return Err(("invalid_loom_index".to_string(), 2));
+    }
+    let path = root.join(index_path(id));
+    let text = fs::read_to_string(&path).map_err(|_| ("loom_index_not_found".to_string(), 2))?;
+    let mut found = false;
+    let mut output = String::new();
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut entry: Value =
+            serde_json::from_str(line).map_err(|_| ("invalid_loom_index".to_string(), 1))?;
+        if entry["id"].as_str() == Some(id) && entry["version"].as_str() == Some(version) {
+            entry["yanked"] = Value::Bool(!undo);
+            found = true;
+        }
+        output.push_str(
+            &serde_json::to_string(&entry).map_err(|_| ("invalid_loom_index".to_string(), 1))?,
+        );
+        output.push('\n');
+    }
+    if !found {
+        return Err(("loom_version_not_available".to_string(), 2));
+    }
+    fs::write(&path, output).map_err(io_error)?;
+    Ok(json!({
+        "status": "ok", "operation": "loom_yank", "index": root.to_string_lossy().replace('\\', "/"),
+        "id": id, "version": version, "yanked": !undo
+    }))
+}
+
+fn safe_component(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value.contains(['/', '\\'])
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_' | b'+'))
+}
+
 fn tarball(spec: &Spec) -> Result<Vec<u8>, Failure> {
     let root = format!("{}-{}", spec.id, spec.version);
     let encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -108,7 +151,7 @@ fn append(
         .map_err(io_error)
 }
 
-fn index_path(id: &str) -> String {
+pub(super) fn index_path(id: &str) -> String {
     match id.len() {
         0 | 1 => format!("1/{id}"),
         2 => format!("2/{id}"),

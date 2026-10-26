@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.0
+
+- `yank ID@VERSION --index DIR` marks a static index version yanked; `--undo`
+  clears it. The tarball and history remain.
+
 ## 0.14.0
 
 - Add `loom index --static --out DIR` to export any Git registry as a static

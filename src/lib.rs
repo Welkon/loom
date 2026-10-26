@@ -81,7 +81,7 @@ pub fn run(args: &[String]) -> (String, u8) {
                 "loom pack DIR --id ID --kind driver|operator --out DIR",
                 "loom doctor [--cwd DIR]",
                 "loom publish DIR --id ID --kind driver|operator --registry DIR",
-                "loom yank ID --registry DIR [--prune]"
+                "loom yank ID[@VERSION] --registry DIR [--prune] | --index DIR [--undo]"
             ]
         })),
         _ => Err(("unknown_loom_command".to_string(), 2)),
