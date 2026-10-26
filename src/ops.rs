@@ -262,6 +262,7 @@ pub(super) fn update(raw: &[String]) -> Result<Value, Failure> {
         "status": "ok",
         "operation": "loom_update",
         "updated": updated,
+        "dependencies": dependencies,
         "dry_run": options.dry_run
     }))
 }
