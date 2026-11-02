@@ -3,7 +3,7 @@
 `loom` installs pinned embedded C units into a project.
 
 It is the CLI and lockfile layer, independent of the catalog. The catalog lives
-at <https://git.pcbsmt.me/rh/emb-loom>, and the site at
+at <https://github.com/Welkon/loom-package>, and the site at
 <https://loom.pcbsmt.me>.
 
 ```sh
