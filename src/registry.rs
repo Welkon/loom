@@ -11,6 +11,10 @@ pub(super) struct UnitFile {
     pub bytes: Vec<u8>,
 }
 
+/// Catalog used when nothing else names one. Cloned once into the cache, so a
+/// standalone `loom` needs no flags and no local copy of the catalog.
+pub(super) const DEFAULT_CATALOG: &str = "https://github.com/Welkon/loom-package.git";
+
 pub(super) struct Registry {
     pub root: PathBuf,
     pub manifest: Value,
@@ -31,6 +35,13 @@ impl Registry {
         {
             candidates.push(registry_path(&directory)?);
         }
+        // Same setting under the tool's own name, for a project that never
+        // installed the emb runtime.
+        if let Ok(directory) = std::env::var("LOOM_REGISTRY")
+            && !directory.is_empty()
+        {
+            candidates.push(registry_path(&directory)?);
+        }
         if let Ok(executable) = std::env::current_exe()
             && let Some(bin) = executable.parent()
             && let Some(package) = bin.parent()
@@ -44,7 +55,25 @@ impl Registry {
                 return Self::load(root);
             }
         }
-        Err(("loom_registry_missing".to_string(), 1))
+        Self::published_catalog()
+    }
+
+    /// Last resort: the published catalog. `LOOM_CATALOG` overrides the
+    /// location, accepts a directory or a Git URL, and an empty value pins the
+    /// "no catalog" behaviour for offline use and tests.
+    fn published_catalog() -> Result<Self, (String, u8)> {
+        let source = match std::env::var("LOOM_CATALOG") {
+            Ok(value) if value.is_empty() => {
+                return Err(("loom_registry_missing".to_string(), 1));
+            }
+            Ok(value) => value,
+            Err(_) => DEFAULT_CATALOG.to_string(),
+        };
+        let root = registry_path(&source)?;
+        if !root.join("loom.json").is_file() {
+            return Err(("loom_registry_missing".to_string(), 1));
+        }
+        Self::load(root)
     }
 
     fn load(root: PathBuf) -> Result<Self, (String, u8)> {

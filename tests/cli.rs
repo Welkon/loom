@@ -1191,3 +1191,45 @@ fn loom_reports_its_version() {
         );
     }
 }
+
+#[test]
+fn loom_uses_the_catalog_from_the_environment_without_flags() {
+    let base = std::env::temp_dir().join(format!("loom-catalog-env-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(&project).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+
+    for variable in ["LOOM_CATALOG", "LOOM_REGISTRY"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+            .args(["list", "--json", "--cwd", project.to_str().unwrap()])
+            .env(variable, &registry)
+            .env_remove("EMB_LOOM_REGISTRY")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{variable}: {output:?}");
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["count"].as_u64(), Some(1), "{variable}");
+    }
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn loom_reports_a_missing_catalog_instead_of_reaching_the_network() {
+    let base = std::env::temp_dir().join(format!("loom-catalog-off-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args(["list", "--json", "--cwd", base.to_str().unwrap()])
+        .env("LOOM_CATALOG", "")
+        .env_remove("EMB_LOOM_REGISTRY")
+        .env_remove("LOOM_REGISTRY")
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "{output:?}");
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "loom_registry_missing");
+    let _ = fs::remove_dir_all(&base);
+}

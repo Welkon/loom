@@ -1,0 +1,124 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+          - name: linux-arm64
+            target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            ext: ""
+          - name: macos-arm64
+            target: aarch64-apple-darwin
+            os: macos-latest
+            ext: ""
+          - name: macos-x86_64
+            target: x86_64-apple-darwin
+            os: macos-15-intel
+            ext: ""
+          - name: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: ".exe"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Verify the binary reports the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          binary="target/${{ matrix.target }}/release/loom${{ matrix.ext }}"
+          reported="$("$binary" --version)"
+          expected="${GITHUB_REF_NAME#v}"
+          if [ "$reported" != "$expected" ]; then
+            echo "::error::loom --version reports $reported but the tag is $GITHUB_REF_NAME"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loom-${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/loom${{ matrix.ext }}
+          if-no-files-found: error
+  package:
+    name: package
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums and manifest
+        run: |
+          set -eu
+          mkdir -p release-assets
+          for file in artifacts/*; do
+            name="$(basename "$file")"
+            if [ "${name#loom-}" = "$name" ]; then continue; fi
+            cp "$file" "release-assets/$name"
+          done
+          cd release-assets
+          sha256sum loom-* > checksums-sha256.txt
+          cat checksums-sha256.txt
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo "{"
+            echo "  \"product\": \"loom\","
+            echo "  \"version\": \"$version\","
+            echo "  \"tag\": \"$GITHUB_REF_NAME\","
+            echo "  \"artifacts\": {"
+            first=1
+            for file in loom-*; do
+              [ "$first" -eq 1 ] || echo ","
+              first=0
+              printf '    "%s": {"filename": "%s", "size": %s, "sha256": "%s"}' \
+                "$file" "$file" "$(wc -c < "$file")" "$(sha256sum "$file" | cut -d' ' -f1)"
+            done
+            echo ""
+            echo "  }"
+            echo "}"
+          } > runtime-manifest.json
+          cat runtime-manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+          if-no-files-found: error
+  release:
+    name: release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: release-assets
+      - run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "loom ${GITHUB_REF_NAME#v}" \
+            --generate-notes \
+            release-assets/*
+        env:
+          GH_TOKEN: ${{ github.token }}

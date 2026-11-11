@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.0
+
+- Standalone use: when nothing names a catalog, `loom` falls back to the
+  published one (`LOOM_CATALOG`, then `Welkon/loom-package`), cloned once into
+  the cache. `LOOM_REGISTRY` is accepted next to `EMB_LOOM_REGISTRY`, and an
+  empty `LOOM_CATALOG` keeps `loom_registry_missing` for offline use.
+- Prebuilt binaries: a release workflow publishes `loom-<platform>` for five
+  targets with `checksums-sha256.txt` and `runtime-manifest.json`, and
+  `install.sh` verifies the checksum before installing.
+
 ## 0.16.1
 
 - `loom --version` prints the crate version, so a host can pick the newer of

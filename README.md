@@ -46,8 +46,9 @@ provenance never contain the token.
 ## Registry
 
 A registry is a directory with `loom.json` and `loom.lock`. Select it with
-`--registry DIR`, `EMB_LOOM_REGISTRY`, or the package/project fallback paths.
-The CLI never bundles a catalog.
+`--registry DIR`, `LOOM_REGISTRY`, `EMB_LOOM_REGISTRY`, or `LOOM_CATALOG`; with
+nothing set, the published catalog is cloned into the cache. The CLI never
+bundles a catalog.
 
 `--index` reads a Cargo-style static registry: per-unit index files,
 `config.json`, and one tarball per version. It accepts an HTTPS URL or a local
