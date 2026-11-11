@@ -6,13 +6,60 @@ It is the CLI and lockfile layer, independent of the catalog. The catalog lives
 at <https://github.com/Welkon/loom-package>, and the site at
 <https://loom.pcbsmt.me>.
 
+`loom` runs on its own: no IDE, no project template, and no other tool in this
+family. `emb-agent loom` reaches the same commands when that runtime is
+installed, but nothing here needs it.
+
+## Install
+
+```sh
+cargo install loomkit
+```
+
+The crate is `loomkit` because `loom` belongs to another crate. The command it
+installs is `loom` and the library keeps the name `loom`, so a Git dependency
+reads `loom = { package = "loomkit", git = "https://github.com/Welkon/loom.git",
+tag = "v0.18.0" }`.
+
+Without a Rust toolchain, take a release binary:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Welkon/loom/main/install.sh | sh
+```
+
+The script picks the release for this platform, checks it against
+`checksums-sha256.txt`, and installs to `~/.local/bin`. `LOOM_VERSION` selects a
+release and `LOOM_BINDIR` the directory. Every release carries
+`loom-<platform>`, `checksums-sha256.txt`, and `runtime-manifest.json` for the
+five supported platforms: `linux-x86_64`, `linux-arm64`, `macos-x86_64`,
+`macos-arm64`, and `windows-x86_64`.
+
+From a checkout:
+
+```sh
+cargo install --git https://github.com/Welkon/loom.git --tag v0.18.0
+```
+
+## Quickstart
+
 ```sh
 loom search "load cell"
 loom add ads1115
-loom add ads1115 --index https://loom.pcbsmt.me
 loom integrate
 loom verify
 loom guard --staged
+loom adapter ads1115      # write board/ports_ads1115.{h,c}
+```
+
+No flag is needed to find the catalog: the first command that needs one clones
+`Welkon/loom-package` into the cache. `--registry DIR|URL`, `--index URL|DIR`,
+or `LOOM_CATALOG` point somewhere else; `LOOM_CATALOG=` (empty) disables the
+fallback for offline work. `--index` reaches the static registry when a Git
+clone is not wanted.
+
+```sh
+loom add ads1115 --index https://loom.pcbsmt.me
+loom --version
 ```
 
 ## Static index

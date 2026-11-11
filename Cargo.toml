@@ -1,10 +1,24 @@
 [package]
-name = "loom"
-version = "0.17.0"
+# crates.io name. The binary is still `loom`, and the library keeps the same
+# name so a dependency reads `loom = { package = "pinloom", ... }`.
+name = "loomkit"
+version = "0.18.0"
 license = "AGPL-3.0-or-later"
 edition = "2024"
-publish = false
-description = "Pinned embedded drivers and algorithms"
+description = "Install pinned embedded C units into a project"
+repository = "https://github.com/Welkon/loom"
+homepage = "https://loom.pcbsmt.me"
+documentation = "https://github.com/Welkon/loom#readme"
+readme = "README.md"
+keywords = ["embedded", "firmware", "c", "drivers", "lockfile"]
+categories = ["command-line-utilities", "embedded", "development-tools"]
+# The vendored tree and the local cargo config exist for offline builds in
+# this repository; neither belongs in a crate served by crates.io.
+exclude = [".cargo", "vendor", "examples", ".github", "target", "install.sh"]
+
+[lib]
+name = "loom"
+path = "src/lib.rs"
 
 [[bin]]
 name = "loom"

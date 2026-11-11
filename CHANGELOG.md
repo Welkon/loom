@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.18.0
+
+- Publish to crates.io as `loomkit`; `loom` was taken. The installed command is
+  still `loom`, and the library keeps the name `loom`, so a Git dependency moves
+  to `loom = { package = "loomkit", git = ..., tag = "v0.18.0" }`.
+- The packaged crate excludes `vendor/` and `.cargo/config.toml`, which exist for
+  offline builds in this repository only.
+
 ## 0.17.0
 
 - Standalone use: when nothing names a catalog, `loom` falls back to the
