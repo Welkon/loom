@@ -50,10 +50,18 @@ jobs:
             echo "::error::loom --version reports $reported but the tag is $GITHUB_REF_NAME"
             exit 1
           fi
+      # Every build produces a file named `loom`, so name the asset here: the
+      # package job merges all artifacts into one directory.
+      - name: Stage the asset
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/loom${{ matrix.ext }}" \
+             "dist/loom-${{ matrix.name }}${{ matrix.ext }}"
       - uses: actions/upload-artifact@v4
         with:
           name: loom-${{ matrix.name }}
-          path: target/${{ matrix.target }}/release/loom${{ matrix.ext }}
+          path: dist/loom-${{ matrix.name }}${{ matrix.ext }}
           if-no-files-found: error
   package:
     name: package
@@ -69,12 +77,9 @@ jobs:
       - name: Checksums and manifest
         run: |
           set -eu
+          ls -l artifacts
           mkdir -p release-assets
-          for file in artifacts/*; do
-            name="$(basename "$file")"
-            if [ "${name#loom-}" = "$name" ]; then continue; fi
-            cp "$file" "release-assets/$name"
-          done
+          cp artifacts/loom-* release-assets/
           cd release-assets
           sha256sum loom-* > checksums-sha256.txt
           cat checksums-sha256.txt
