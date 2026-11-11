@@ -1176,3 +1176,18 @@ fn loom_adapter_refuses_a_unit_without_a_port() {
     assert_eq!(value["error"]["code"], "loom_adapter_no_port");
     let _ = fs::remove_dir_all(&base);
 }
+
+#[test]
+fn loom_reports_its_version() {
+    for flag in ["--version", "-V"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+            .arg(flag)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout).trim(),
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+}

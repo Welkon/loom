@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.1
+
+- `loom --version` prints the crate version, so a host can pick the newer of
+  an installed binary and an embedded copy.
+
 ## 0.16.0
 
 - `loom adapter ID` writes `board/ports_<id>.h` and `.c` with one stub per port

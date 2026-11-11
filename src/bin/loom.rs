@@ -2,8 +2,12 @@
 //! `emb-agent loom`.
 
 fn main() {
-    let mut args = vec!["loom".to_string()];
-    args.extend(std::env::args().skip(1));
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(args.first().map(String::as_str), Some("--version" | "-V")) {
+        println!("{}", loom::VERSION);
+        return;
+    }
+    args.insert(0, "loom".to_string());
     let (body, exit) = loom::run(&args);
     println!("{body}");
     std::process::exit(exit.into());

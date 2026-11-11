@@ -8,6 +8,9 @@ mod spec;
 mod static_index;
 mod store;
 
+/// Crate version, reported by `loom --version`.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 use registry::Registry;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
