@@ -3,3 +3,6 @@ target/
 .target/
 .target-guard/
 .target-offline/
+
+# example build outputs
+examples/*/adapter_test

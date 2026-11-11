@@ -17,3 +17,9 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --offline --all-targets -- -D warnings
       - run: cargo test --offline
+      - uses: actions/checkout@v4
+        with:
+          repository: Welkon/loom-package
+          ref: v0.24.1
+          path: catalog
+      - run: make -C examples/sc8f072-hx711 test LOOM=${GITHUB_WORKSPACE}/catalog
