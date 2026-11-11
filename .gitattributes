@@ -1,0 +1,5 @@
+# Line endings are part of the source here: `vendor/` is a `directory` cargo
+# source whose `.cargo-checksum.json` hashes every file, so a checkout that
+# rewrites LF to CRLF fails with "the listed checksum has changed".
+* text=auto eol=lf
+vendor/** -text
