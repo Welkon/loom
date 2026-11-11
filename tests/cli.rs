@@ -1018,3 +1018,161 @@ fn loom_yank_marks_a_static_index_without_deleting_the_tarball() {
     assert!(added.status.success(), "{added:?}");
     let _ = fs::remove_dir_all(&base);
 }
+
+fn write_port_registry(root: &Path) {
+    let unit = root.join("drivers/demo");
+    fs::create_dir_all(&unit).unwrap();
+    let readme = "# demo\n\nDemo driver.\n";
+    let header = "typedef struct {\n    void *context;\n    uint8_t (*read)(void *context);\n    void (*set)(void *context, uint8_t level);\n    void (*delay_us)(void *context, uint16_t microseconds);\n} demo_port_t;\n\ndemo_port_t demo_port(void);\n";
+    let source = "#include \"demo.h\"\n\ndemo_port_t demo_port(void) { demo_port_t port = {0}; return port; }\n";
+    let mut hasher = Sha256::new();
+    for (relative, content) in [
+        ("README.md", readme),
+        ("demo.c", source),
+        ("demo.h", header),
+    ] {
+        hasher.update(relative.as_bytes());
+        hasher.update(b"\0");
+        hasher.update(content.as_bytes());
+        hasher.update(b"\0");
+    }
+    let sha256 = format!("{:x}", hasher.finalize());
+    fs::write(unit.join("README.md"), readme).unwrap();
+    fs::write(unit.join("demo.c"), source).unwrap();
+    fs::write(unit.join("demo.h"), header).unwrap();
+    let manifest = json!({
+        "schema": 1,
+        "name": "temp",
+        "version": "0.1.0",
+        "license": "MIT",
+        "units": [{
+            "id": "demo",
+            "kind": "driver",
+            "version": "0.1.0",
+            "path": "drivers/demo",
+            "summary": "Demo driver",
+            "tags": ["demo"],
+            "applications": ["test"]
+        }]
+    });
+    let lock = json!({
+        "schema": 1,
+        "source": "temp",
+        "ref": "0.1.0",
+        "commit": "x",
+        "units": {"demo": {"version": "0.1.0", "sha256": sha256}}
+    });
+    fs::write(
+        root.join("loom.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        root.join("loom.lock"),
+        serde_json::to_vec_pretty(&lock).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn loom_adapter_generates_a_port_skeleton_and_checks_the_surface() {
+    let base = std::env::temp_dir().join(format!("loom-adapter-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(project.join(".git")).unwrap();
+    write_port_registry(&registry);
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+            .args(args)
+            .args(["--cwd", project.to_str().unwrap(), "--json"])
+            .output()
+            .unwrap()
+    };
+
+    let add = run(&["add", "demo", "--registry", registry.to_str().unwrap()]);
+    assert!(add.status.success(), "{add:?}");
+
+    let generated = run(&["adapter", "demo"]);
+    assert!(generated.status.success(), "{generated:?}");
+    let value: serde_json::Value = serde_json::from_slice(&generated.stdout).unwrap();
+    assert_eq!(value["operation"], "loom_adapter");
+    assert_eq!(value["files"][0], "board/ports_demo.h");
+    assert_eq!(value["files"][1], "board/ports_demo.c");
+    assert_eq!(value["ports"][0]["type"], "demo_port_t");
+
+    let header = fs::read_to_string(project.join("board/ports_demo.h")).unwrap();
+    assert!(header.contains("demo_port_t board_demo_port(void);"));
+    assert!(header.contains("#include \"demo.h\""));
+    let source = fs::read_to_string(project.join("board/ports_demo.c")).unwrap();
+    assert!(source.contains("static uint8_t demo_read(void *context)"));
+    assert!(source.contains("static void demo_set(void *context, uint8_t level)"));
+    assert!(source.contains("board_delay_us(microseconds);"));
+    assert!(source.contains("port.read = demo_read;"));
+    assert!(source.contains("port.context = 0;"));
+
+    let check = run(&["adapter", "demo", "--check"]);
+    assert!(check.status.success(), "{check:?}");
+
+    let again = run(&["adapter", "demo"]);
+    let value: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(value["skipped"][0], "board/ports_demo.h");
+
+    fs::write(
+        project.join("board/ports_demo.c"),
+        source.replace("    port.read = demo_read;\n", ""),
+    )
+    .unwrap();
+    let stale = run(&["adapter", "demo", "--check"]);
+    assert!(!stale.status.success(), "{stale:?}");
+    let value: serde_json::Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "loom_adapter_stale");
+    assert_eq!(value["stale"][0], "ports_demo.c:read");
+
+    let restored = run(&["adapter", "demo", "--force"]);
+    assert!(restored.status.success(), "{restored:?}");
+    assert!(
+        fs::read_to_string(project.join("board/ports_demo.c"))
+            .unwrap()
+            .contains("port.read = demo_read;")
+    );
+
+    let _ = fs::remove_dir_all(&base);
+}
+
+#[test]
+fn loom_adapter_refuses_a_unit_without_a_port() {
+    let base = std::env::temp_dir().join(format!("loom-adapter-bare-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let project = base.join("project");
+    fs::create_dir_all(project.join(".git")).unwrap();
+    write_registry(&registry, "0.1.0", "void demo(void) {}\n");
+    let add = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "add",
+            "demo",
+            "--registry",
+            registry.to_str().unwrap(),
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(add.status.success(), "{add:?}");
+    let adapter = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "adapter",
+            "demo",
+            "--cwd",
+            project.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!adapter.status.success(), "{adapter:?}");
+    let value: serde_json::Value = serde_json::from_slice(&adapter.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "loom_adapter_no_port");
+    let _ = fs::remove_dir_all(&base);
+}

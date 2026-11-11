@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `loom adapter ID` writes `board/ports_<id>.h` and `.c` with one stub per port
+  function and a `board_<id>_port()` builder. `--check` reports a port function
+  with no assignment; `--force` overwrites a hand-edited file.
+
 ## 0.15.0
 
 - `yank ID@VERSION --index DIR` marks a static index version yanked; `--undo`

@@ -125,6 +125,45 @@ fails when they are stale.
 For Cargo, `loom.cargo.rs` exposes `LOOM_SOURCES`, `LOOM_INCLUDE_DIRS`, and
 `build()`; include it from `build.rs` and add `cc` as a build dependency.
 
+## Adapter
+
+`loom adapter ID` writes the project-owned port implementation for an installed
+driver:
+
+```
+board/ports_<id>.h
+board/ports_<id>.c
+```
+
+The header declares `board_<id>_port()`, the builder the unit README uses in its
+integration block. The source has one stub per port function, with the exact
+signature and a `TODO`; `delay_us` and `delay_ms` call `board_delay_us()` and
+`board_delay_ms()`.
+
+The generated source includes `target.h`. The command does not create it: that
+file is where the project names pins and registers, and it is the only place
+that includes a vendor header. `loom adapter` never writes an MCU name.
+
+```sh
+loom adapter hx711
+loom adapter hx711 --check   # a port function has no assignment
+loom adapter hx711 --force   # overwrite a hand-edited file
+```
+
+`--check` reads the unit header and fails when a port function has no
+`port.<name> =` assignment, so a unit update that adds a function is caught.
+Hand edits are preserved. An existing file is skipped without `--force`.
+
+## Examples
+
+`examples/sc8f072-hx711/` is a worked adapter for an 8-bit SCMCU target: the
+generated stubs, a filled `board/target.h`, and a host test that runs the unit's
+own behavior assertions without hardware or XC8.
+
+```sh
+make -C examples/sc8f072-hx711 test
+```
+
 ## License
 
 AGPL-3.0-or-later. Catalog units keep their own MIT/BSD/Apache licenses.
