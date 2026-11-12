@@ -19,7 +19,7 @@ cargo install loomkit
 The crate is `loomkit` because `loom` belongs to another crate. The command it
 installs is `loom` and the library keeps the name `loom`, so a Git dependency
 reads `loom = { package = "loomkit", git = "https://github.com/Welkon/loom.git",
-tag = "v0.18.0" }`.
+tag = "v0.19.0" }`.
 
 Without a Rust toolchain, take a release binary:
 
@@ -37,7 +37,7 @@ five supported platforms: `linux-x86_64`, `linux-arm64`, `macos-x86_64`,
 From a checkout:
 
 ```sh
-cargo install --git https://github.com/Welkon/loom.git --tag v0.18.0
+cargo install --git https://github.com/Welkon/loom.git --tag v0.19.0
 ```
 
 ## Quickstart
@@ -50,6 +50,12 @@ loom verify
 loom guard --staged
 loom adapter ads1115      # write board/ports_ads1115.{h,c}
 ```
+
+`loom search` matches catalog metadata, not source code, and it is lexical: a
+query is split into keywords and ranked by the unit id, summary, tags and
+applications each term hits. Use short terms (sensor family, protocol,
+operation) plus `--kind driver|operator` and `--tag`; a long sentence works only
+through its distinctive words.
 
 No flag is needed to find the catalog: the first command that needs one clones
 `Welkon/loom-package` into the cache. `--registry DIR|URL`, `--index URL|DIR`,

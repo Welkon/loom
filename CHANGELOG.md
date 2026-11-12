@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.19.0
+
+- `loom search` treats the query as keywords instead of one substring. A phrase
+  such as `TQ322 PMS150G Mini-C PIR` now matches the distinctive `PIR` term, and
+  the result is ranked by the best field each term hits.
+- `loom search` accepts `--kind KIND` and `--tag TAG`, as the emb-loom skill
+  already documented. Before this release the same flags only worked on
+  `loom list`, and search rejected them with `unknown_argument:--kind`.
+- A read-only cache directory no longer fails search. When `HOME` or
+  `XDG_CACHE_HOME` cannot accept the cloned catalog, the cache falls back to the
+  system temp directory while keeping an existing cache usable.
+
 ## 0.18.0
 
 - Publish to crates.io as `loomkit`; `loom` was taken. The installed command is

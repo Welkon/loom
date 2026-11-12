@@ -404,54 +404,189 @@ pub(super) fn verify(raw: &[String]) -> Result<Value, Failure> {
 }
 
 pub(super) fn search(raw: &[String]) -> Result<Value, Failure> {
-    let query = raw
-        .first()
-        .filter(|value| !value.starts_with('-'))
-        .ok_or_else(|| ("missing_loom_query".to_string(), 2))?
-        .to_lowercase();
-    let options = Options::parse(raw, 1)?;
+    let options = SearchOptions::parse(raw)?;
     let registry = Registry::discover(&options.cwd()?, options.registry.as_deref())?;
-    let manifest = &registry.manifest;
-    let units = manifest["units"]
+    let units = registry.manifest["units"]
         .as_array()
         .ok_or_else(|| ("invalid_loom_manifest".to_string(), 1))?;
-    let matches: Vec<Value> = units
+    let terms = search_terms(&options.query);
+    let mut matches: Vec<(u32, Value)> = units
         .iter()
         .filter(|unit| {
-            let id = unit["id"].as_str().unwrap_or("").to_lowercase();
-            let summary = unit["summary"].as_str().unwrap_or("").to_lowercase();
-            let tags = unit["tags"].as_array().is_some_and(|tags| {
-                tags.iter().any(|tag| {
-                    tag.as_str()
-                        .is_some_and(|tag| tag.to_lowercase().contains(&query))
-                })
-            });
-            let applications = unit["applications"].as_array().is_some_and(|apps| {
-                apps.iter().any(|app| {
-                    app.as_str()
-                        .is_some_and(|app| app.to_lowercase().contains(&query))
-                })
-            });
-            id.contains(&query) || summary.contains(&query) || tags || applications
+            options
+                .kind
+                .as_ref()
+                .is_none_or(|kind| unit["kind"].as_str() == Some(kind.as_str()))
         })
-        .map(|unit| {
-            json!({
-                "id": unit["id"],
-                "kind": unit["kind"],
-                "version": unit["version"],
-                "summary": unit["summary"],
-                "tags": unit["tags"],
-                "applications": unit["applications"]
+        .filter(|unit| {
+            options.tag.as_ref().is_none_or(|tag| {
+                unit["tags"].as_array().is_some_and(|tags| {
+                    tags.iter()
+                        .any(|value| value.as_str() == Some(tag.as_str()))
+                })
+            })
+        })
+        .filter_map(|unit| {
+            let score = unit_score(unit, &terms);
+            (score > 0).then(|| {
+                (
+                    score,
+                    json!({
+                        "id": unit["id"],
+                        "kind": unit["kind"],
+                        "version": unit["version"],
+                        "summary": unit["summary"],
+                        "tags": unit["tags"],
+                        "applications": unit["applications"],
+                        "score": score
+                    }),
+                )
             })
         })
         .collect();
+    matches.sort_by(|left, right| {
+        right.0.cmp(&left.0).then_with(|| {
+            left.1["id"]
+                .as_str()
+                .unwrap_or("")
+                .cmp(right.1["id"].as_str().unwrap_or(""))
+        })
+    });
+    let units: Vec<Value> = matches.into_iter().map(|(_, unit)| unit).collect();
     Ok(json!({
         "status": "ok",
         "operation": "loom_search",
-        "query": query,
-        "count": matches.len(),
-        "units": matches
+        "query": options.query,
+        "count": units.len(),
+        "units": units
     }))
+}
+
+struct SearchOptions {
+    query: String,
+    cwd: Option<String>,
+    registry: Option<String>,
+    kind: Option<String>,
+    tag: Option<String>,
+}
+
+impl SearchOptions {
+    fn parse(raw: &[String]) -> Result<Self, Failure> {
+        let mut options = Self {
+            query: String::new(),
+            cwd: None,
+            registry: None,
+            kind: None,
+            tag: None,
+        };
+        let mut index = 0;
+        while index < raw.len() {
+            match raw[index].as_str() {
+                "--json" | "--brief" => index += 1,
+                "--cwd" | "--registry" | "--kind" | "--tag" => {
+                    let value = raw
+                        .get(index + 1)
+                        .cloned()
+                        .ok_or_else(|| ("missing_argument".to_string(), 2))?;
+                    match raw[index].as_str() {
+                        "--cwd" => options.cwd = Some(value),
+                        "--registry" => options.registry = Some(value),
+                        "--kind" => options.kind = Some(value),
+                        "--tag" => options.tag = Some(value),
+                        _ => unreachable!(),
+                    }
+                    index += 2;
+                }
+                other if other.starts_with('-') => {
+                    return Err((format!("unknown_argument:{other}"), 2));
+                }
+                other => {
+                    if options.query.is_empty() {
+                        options.query = other.to_lowercase();
+                    } else {
+                        return Err(("duplicate_loom_query".to_string(), 2));
+                    }
+                    index += 1;
+                }
+            }
+        }
+        if options.query.is_empty() {
+            return Err(("missing_loom_query".to_string(), 2));
+        }
+        Ok(options)
+    }
+
+    fn cwd(&self) -> Result<PathBuf, Failure> {
+        self.cwd.as_ref().map_or_else(
+            || std::env::current_dir().map_err(store::io_error),
+            |value| Ok(PathBuf::from(value)),
+        )
+    }
+}
+
+/// Split a query into lexical terms; a natural phrase is a bag of keywords,
+/// not one substring. Single-character terms are dropped because they match
+/// almost every summary.
+fn search_terms(query: &str) -> Vec<String> {
+    let terms: Vec<String> = query
+        .split(|value: char| !(value.is_alphanumeric() || value == '+' || value == '#'))
+        .filter(|term| term.chars().count() > 1)
+        .map(str::to_lowercase)
+        .collect();
+    if terms.is_empty() {
+        vec![query.to_lowercase()]
+    } else {
+        terms
+    }
+}
+
+/// Rank one unit by the best field each term matches. A term scores once, so a
+/// unit is not promoted just because one word appears in many fields.
+fn unit_score(unit: &Value, terms: &[String]) -> u32 {
+    let id = unit["id"].as_str().unwrap_or("").to_lowercase();
+    let summary = unit["summary"].as_str().unwrap_or("").to_lowercase();
+    let tags: Vec<String> = unit["tags"]
+        .as_array()
+        .map(|tags| {
+            tags.iter()
+                .filter_map(|tag| tag.as_str())
+                .map(str::to_lowercase)
+                .collect()
+        })
+        .unwrap_or_default();
+    let applications: Vec<String> = unit["applications"]
+        .as_array()
+        .map(|apps| {
+            apps.iter()
+                .filter_map(|app| app.as_str())
+                .map(str::to_lowercase)
+                .collect()
+        })
+        .unwrap_or_default();
+    terms
+        .iter()
+        .map(|term| {
+            let mut best = 0;
+            if id == *term {
+                best = 8;
+            } else if id.contains(term) {
+                best = 5;
+            }
+            if tags.iter().any(|tag| tag == term) {
+                best = best.max(4);
+            }
+            if tags.iter().any(|tag| tag.contains(term)) {
+                best = best.max(3);
+            }
+            if summary.contains(term) {
+                best = best.max(2);
+            }
+            if applications.iter().any(|app| app.contains(term)) {
+                best = best.max(2);
+            }
+            best
+        })
+        .sum()
 }
 
 pub(super) fn list_installed(raw: &[String]) -> Result<Value, Failure> {

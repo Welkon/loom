@@ -1233,3 +1233,146 @@ fn loom_reports_a_missing_catalog_instead_of_reaching_the_network() {
     assert_eq!(value["error"]["code"], "loom_registry_missing");
     let _ = fs::remove_dir_all(&base);
 }
+
+fn search_registry(root: &Path) {
+    let _ = fs::remove_dir_all(root);
+    fs::create_dir_all(root.join("operators/pir")).unwrap();
+    let manifest = json!({
+        "schema": 1,
+        "name": "search",
+        "version": "1.0.0",
+        "license": "MIT",
+        "units": [
+            {
+                "id": "pir",
+                "kind": "operator",
+                "version": "0.1.0",
+                "path": "operators/pir",
+                "summary": "PIR motion detector signal chain for sampled pyroelectric data.",
+                "tags": ["motion", "pir", "filter"],
+                "applications": ["raw PIR front end"]
+            },
+            {
+                "id": "median",
+                "kind": "operator",
+                "version": "0.2.0",
+                "path": "operators/median",
+                "summary": "Remove impulses with an N-sample median.",
+                "tags": ["filter", "adc"],
+                "applications": ["PIR impulses"]
+            },
+            {
+                "id": "tq322-driver",
+                "kind": "driver",
+                "version": "0.1.0",
+                "path": "drivers/tq322",
+                "summary": "Single-wire TQ322 frame reader.",
+                "tags": ["sensor"],
+                "applications": ["digital PIR"]
+            }
+        ]
+    });
+    let lock = json!({
+        "schema": 1,
+        "source": "test",
+        "ref": "x",
+        "commit": "x",
+        "units": {
+            "pir": {"version": "0.1.0", "sha256": ""},
+            "median": {"version": "0.2.0", "sha256": ""},
+            "tq322-driver": {"version": "0.1.0", "sha256": ""}
+        }
+    });
+    fs::write(
+        root.join("loom.json"),
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        root.join("loom.lock"),
+        serde_json::to_vec_pretty(&lock).unwrap(),
+    )
+    .unwrap();
+}
+
+fn loom_search(registry: &Path, args: &[&str]) -> serde_json::Value {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .arg("search")
+        .args(args)
+        .args(["--registry", registry.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn loom_search_reads_a_phrase_as_keywords() {
+    let root = std::env::temp_dir().join(format!("loom-search-phrase-{}", std::process::id()));
+    search_registry(&root);
+
+    let value = loom_search(&root, &["TQ322 PMS150G Mini-C PIR"]);
+    assert_eq!(value["status"], "ok");
+    assert!(value["count"].as_u64().unwrap() >= 2, "{value}");
+    assert_eq!(value["units"][0]["id"], "pir");
+    let ids: Vec<&str> = value["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|unit| unit["id"].as_str())
+        .collect();
+    assert!(ids.contains(&"median"));
+    assert!(ids.contains(&"tq322-driver"));
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn loom_search_filters_by_kind_and_tag() {
+    let root = std::env::temp_dir().join(format!("loom-search-filter-{}", std::process::id()));
+    search_registry(&root);
+
+    let operator = loom_search(&root, &["PIR", "--kind", "operator"]);
+    assert_eq!(operator["count"], 2, "{operator}");
+    assert!(
+        operator["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|unit| unit["kind"] == "operator")
+    );
+
+    let motion = loom_search(&root, &["PIR", "--kind", "operator", "--tag", "motion"]);
+    assert_eq!(motion["count"], 1, "{motion}");
+    assert_eq!(motion["units"][0]["id"], "pir");
+
+    let driver = loom_search(&root, &["PIR", "--kind", "driver"]);
+    assert_eq!(driver["count"], 1, "{driver}");
+    assert_eq!(driver["units"][0]["id"], "tq322-driver");
+
+    let none = loom_search(&root, &["PIR", "--kind", "driver", "--tag", "filter"]);
+    assert_eq!(none["count"], 0, "{none}");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn loom_search_rejects_an_unknown_flag() {
+    let root = std::env::temp_dir().join(format!("loom-search-flag-{}", std::process::id()));
+    search_registry(&root);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_loom"))
+        .args([
+            "search",
+            "PIR",
+            "--bogus",
+            "--registry",
+            root.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "unknown_argument:--bogus");
+    let _ = fs::remove_dir_all(&root);
+}

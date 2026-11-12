@@ -157,34 +157,51 @@ fn registry_path(value: &str) -> Result<PathBuf, (String, u8)> {
     if !is_remote(value) {
         return Ok(PathBuf::from(value));
     }
-    let cache = cache_root().join(hex(Sha256::digest(value.as_bytes())));
-    if cache.join("loom.json").is_file()
-        && std::env::var("LOOM_REGISTRY_REFRESH").as_deref() == Ok("1")
-    {
+    let digest = hex(Sha256::digest(value.as_bytes()));
+    let refresh = std::env::var("LOOM_REGISTRY_REFRESH").as_deref() == Ok("1");
+    let mut cache = cache_root().join(&digest);
+    if refresh && cache.join("loom.json").is_file() {
         let _ = fs::remove_dir_all(&cache);
     }
-    if cache.join("loom.json").is_file() {
-        if cache.join(".git/shallow").is_file() {
-            let _ = Command::new("git")
-                .arg("-C")
-                .arg(&cache)
-                .args(["fetch", "--unshallow", "--tags"])
-                .output();
+    if !cache.join("loom.json").is_file() && clone_catalog(value, &cache).is_err() {
+        // A sandbox can make HOME read-only while /tmp stays writable. The
+        // catalog is a cache, so a writable fallback keeps search usable.
+        let fallback = std::env::temp_dir().join("loom/registries").join(&digest);
+        if fallback == cache {
+            return Err(("loom_registry_fetch_failed".to_string(), 1));
         }
-        return Ok(cache);
+        cache = fallback;
+        if refresh && cache.join("loom.json").is_file() {
+            let _ = fs::remove_dir_all(&cache);
+        }
+        if !cache.join("loom.json").is_file() {
+            clone_catalog(value, &cache)?;
+        }
     }
+    if cache.join(".git/shallow").is_file() {
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&cache)
+            .args(["fetch", "--unshallow", "--tags"])
+            .output();
+    }
+    Ok(cache)
+}
+
+fn clone_catalog(value: &str, cache: &Path) -> Result<(), (String, u8)> {
     if let Some(parent) = cache.parent() {
         fs::create_dir_all(parent).map_err(io_error)?;
     }
     let output = Command::new("git")
         .args(["clone", "--quiet", value])
-        .arg(&cache)
+        .arg(cache)
         .output()
         .map_err(|_| ("loom_registry_fetch_failed".to_string(), 1))?;
-    if !output.status.success() || !cache.join("loom.json").is_file() {
-        return Err(("loom_registry_fetch_failed".to_string(), 1));
+    if output.status.success() && cache.join("loom.json").is_file() {
+        return Ok(());
     }
-    Ok(cache)
+    let _ = fs::remove_dir_all(cache);
+    Err(("loom_registry_fetch_failed".to_string(), 1))
 }
 
 fn is_remote(value: &str) -> bool {
